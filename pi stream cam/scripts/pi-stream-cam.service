@@ -1,0 +1,19 @@
+[Unit]
+Description=Pi Stream Cam Service
+After=network.target
+
+[Service]
+Type=simple
+User=picam
+WorkingDirectory=/opt/pi-stream-cam
+ExecStart=/opt/pi-stream-cam/pi-stream-cam
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/pi-stream-cam/output.log
+StandardError=append:/var/log/pi-stream-cam/error.log
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
+
+[Install]
+WantedBy=multi-user.target

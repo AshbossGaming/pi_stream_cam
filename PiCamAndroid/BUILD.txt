@@ -1,0 +1,9 @@
+# Quick build script - run this after installing Gradle or in Android Studio terminal
+# Or just open the project in Android Studio and click Run
+
+# To build from command line (requires Gradle installed):
+# cd C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid
+# gradle assembleDebug
+
+# Then install:
+# adb install app\build\outputs\apk\debug\app-debug.apk

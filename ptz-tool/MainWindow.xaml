@@ -1,0 +1,94 @@
+<Window x:Class="PTZTool.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PTZ Control" Height="420" Width="260"
+        Topmost="True" WindowStyle="ToolWindow" ResizeMode="NoResize"
+        Background="#1a1a1a">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Camera Selection -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+            <Button x:Name="Cam1Btn" Content="Cam 1" Width="60" Margin="0,0,4,0" Click="Cam1_Click"/>
+            <Button x:Name="Cam2Btn" Content="Cam 2" Width="60" Margin="0,0,4,0" Click="Cam2_Click"/>
+            <TextBox x:Name="CamIp" Width="80" Text="192.168.100.203" TextChanged="CamIp_Changed"/>
+            <Button Content="Go" Width="30" Click="Go_Click"/>
+        </StackPanel>
+        
+        <!-- Stream Preview -->
+        <Border Grid.Row="1" BorderBrush="#444" BorderThickness="1" Margin="0,0,0,8">
+            <Image x:Name="StreamPreview" Height="100" Stretch="Uniform"/>
+        </Border>
+        
+        <!-- Controls -->
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            
+            <!-- D-Pad -->
+            <Grid Grid.Row="0" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                <Button Grid.Column="1" Grid.Row="0" Content="▲" Click="TiltUp_Click"/>
+                <Button Grid.Column="0" Grid.Row="1" Content="◀" Click="PanLeft_Click"/>
+                <Button Grid.Column="2" Grid.Row="1" Content="▶" Click="PanRight_Click"/>
+                <Button Grid.Column="1" Grid.Row="2" Content="▼" Click="TiltDown_Click"/>
+            </Grid>
+            
+            <!-- Pan Slider -->
+            <StackPanel Grid.Row="1" Margin="0,0,0,4">
+                <DockPanel>
+                    <TextBlock Text="Pan" Foreground="#888" FontSize="11" DockPanel.Dock="Left"/>
+                    <TextBlock x:Name="PanValue" Text="90°" Foreground="#888" FontSize="11" HorizontalAlignment="Right"/>
+                </DockPanel>
+                <Slider x:Name="PanSlider" Minimum="0" Maximum="180" Value="90" ValueChanged="PanSlider_Changed"/>
+            </StackPanel>
+            
+            <!-- Tilt Slider -->
+            <StackPanel Grid.Row="2" Margin="0,0,0,4">
+                <DockPanel>
+                    <TextBlock Text="Tilt" Foreground="#888" FontSize="11" DockPanel.Dock="Left"/>
+                    <TextBlock x:Name="TiltValue" Text="45°" Foreground="#888" FontSize="11" HorizontalAlignment="Right"/>
+                </DockPanel>
+                <Slider x:Name="TiltSlider" Minimum="0" Maximum="90" Value="45" ValueChanged="TiltSlider_Changed"/>
+            </StackPanel>
+            
+            <!-- Zoom Slider -->
+            <StackPanel Grid.Row="3" Margin="0,0,0,4">
+                <DockPanel>
+                    <TextBlock Text="Zoom" Foreground="#888" FontSize="11" DockPanel.Dock="Left"/>
+                    <TextBlock x:Name="ZoomValue" Text="1x" Foreground="#888" FontSize="11" HorizontalAlignment="Right"/>
+                </DockPanel>
+                <Slider x:Name="ZoomSlider" Minimum="1" Maximum="8" Value="1" ValueChanged="ZoomSlider_Changed"/>
+            </StackPanel>
+            
+            <!-- Focus Slider -->
+            <StackPanel Grid.Row="4" Margin="0,0,0,4">
+                <DockPanel>
+                    <TextBlock Text="Focus" Foreground="#888" FontSize="11" DockPanel.Dock="Left"/>
+                    <TextBlock x:Name="FocusValue" Text="50" Foreground="#888" FontSize="11" HorizontalAlignment="Right"/>
+                </DockPanel>
+                <Slider x:Name="FocusSlider" Minimum="0" Maximum="100" Value="50" ValueChanged="FocusSlider_Changed"/>
+            </StackPanel>
+        </Grid>
+        
+        <!-- Presets -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal">
+            <Button Content="1" Width="30" Margin="0,0,2,0" Click="Preset1_Click"/>
+            <Button Content="2" Width="30" Margin="0,0,2,0" Click="Preset2_Click"/>
+            <Button Content="3" Width="30" Margin="0,0,2,0" Click="Preset3_Click"/>
+            <Button Content="4" Width="30" Margin="0,0,2,0" Click="Preset4_Click"/>
+            <Button Content="Center" Width="60" Click="Center_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

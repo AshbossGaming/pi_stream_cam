@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PTZ Camera Control</title>
+    <style>
+        * { box-sizing: border-box; margin:0; padding:0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #eee;
+            padding: 12px;
+            min-width: 280px;
+        }
+        h2 { font-size: 14px; margin-bottom: 12px; color: #aaa; }
+        .stream-url { margin-bottom: 12px; }
+        .stream-url label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+        .stream-url input {
+            width: 100%;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .stream-url input:focus { outline: none; border-color: #666; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .btn {
+            background: #3a3a3a;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.15s;
+        }
+        .btn:hover { background: #4a4a4a; }
+        .btn:active { background: #555; }
+        .btn.full { grid-column: 1 / -1; }
+        .btn.danger { border-color: #c44; color: #f88; }
+        .btn.danger:hover { background: #422; }
+        .btn.active { background: #4a4; border-color: #afa; }
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .dpad .btn { padding: 12px; font-size: 16px; }
+        .slider-group { margin-bottom: 12px; }
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .slider-group input[type="range"] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: #333;
+            border-radius: 3px;
+        }
+        .slider-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #666;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .slider-group input[type="range"]::-webkit-slider-thumb:hover { background: #888; }
+        .status {
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+            padding: 8px;
+            background: #222;
+            border-radius: 4px;
+        }
+        .status.error { color: #f88; }
+        .status.success { color: #8f8; }
+        img {
+            width: 100%;
+            height: auto;
+            max-height: 400px;
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            display: block;
+            object-fit: contain;
+        }
+        .preset-btn {
+            position: relative;
+        }
+        .preset-label {
+            font-size: 9px;
+            color: #888;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <h2>PTZ Camera Control</h2>
+    
+    <div class="stream-url">
+        <label>Camera IP</label>
+        <div style="display: flex; gap: 4px; margin-bottom: 4px;">
+            <input type="text" id="camIp" value="192.168.100.203" placeholder="192.168.100.203" style="flex: 1;">
+            <button class="btn" onclick="saveCamIp()" style="padding: 6px 12px;">Save</button>
+        </div>
+        <div style="display: flex; gap: 4px;">
+            <button class="btn" onclick="setIp('192.168.100.203')" style="flex: 1; font-size: 11px; padding: 4px;">Cam 1 (.203)</button>
+            <button class="btn" onclick="setIp('192.168.100.204')" style="flex: 1; font-size: 11px; padding: 4px;">Cam 2 (.204)</button>
+        </div>
+    </div>
+    
+    <div class="stream-url">
+        <label>Stream URL</label>
+        <input type="text" id="streamUrl" value="api/stream/mjpeg" placeholder="api/stream/mjpeg">
+    </div>
+    
+    <img id="streamFrame" src="api/stream/mjpeg">
+    
+    <div class="dpad">
+        <div></div>
+        <button class="btn" onclick="ptzMove('tilt', 5)">&#9650;</button>
+        <div></div>
+        <button class="btn" onclick="ptzMove('pan', -5)">&#9664;</button>
+        <button class="btn" onclick="center()">&#9679;</button>
+        <button class="btn" onclick="ptzMove('pan', 5)">&#9654;</button>
+        <div></div>
+        <button class="btn" onclick="ptzMove('tilt', -5)">&#9660;</button>
+        <div></div>
+    </div>
+    
+    <div class="slider-group">
+        <label>Pan <span id="panValue">90°</span></label>
+        <input type="range" id="panSlider" min="0" max="180" value="90" oninput="updateSlider('pan')">
+    </div>
+    
+    <div class="slider-group">
+        <label>Tilt <span id="tiltValue">90°</span></label>
+        <input type="range" id="tiltSlider" min="0" max="180" value="90" oninput="updateSlider('tilt')">
+    </div>
+    
+    <div class="slider-group">
+        <label>Zoom <span id="zoomValue">1x</span></label>
+        <input type="range" id="zoomSlider" min="1" max="8" value="1" oninput="updateZoom()">
+    </div>
+    
+    <div class="slider-group">
+        <label>Focus <span id="focusValue">50</span></label>
+        <input type="range" id="focusSlider" min="0" max="100" value="50" oninput="updateFocus()" onchange="setFocus()">
+    </div>
+    
+    <div class="slider-group">
+        <label>Exposure <span id="exposureValue">0</span></label>
+        <input type="range" id="exposureSlider" min="-8" max="8" value="0" oninput="updateExposure()" onchange="setExposure()">
+    </div>
+    
+    <div class="slider-group">
+        <label>White Balance <span id="wbValue">Auto</span></label>
+        <input type="range" id="wbSlider" min="0" max="8" value="0" oninput="updateWb()" onchange="setWb()">
+    </div>
+    
+    <div class="slider-group">
+        <label>Sharpness <span id="sharpValue">1.0</span></label>
+        <input type="range" id="sharpSlider" min="0" max="160" value="10" oninput="updateSharpness()" onchange="setSharpness()">
+    </div>
+    
+    <div class="slider-group">
+        <label>Brightness <span id="brightValue">0</span></label>
+        <input type="range" id="brightSlider" min="-10" max="10" value="0" oninput="updateBrightness()" onchange="setBrightness()">
+    </div>
+    
+    <div class="slider-group">
+        <label>Contrast <span id="contrastValue">1.0</span></label>
+        <input type="range" id="contrastSlider" min="0" max="20" value="10" oninput="updateContrast()" onchange="setContrast()">
+    </div>
+    
+    <div class="slider-group">
+        <label>Saturation <span id="satValue">1.0</span></label>
+        <input type="range" id="satSlider" min="0" max="20" value="10" oninput="updateSaturation()" onchange="setSaturation()">
+    </div>
+    
+    <div class="controls" style="margin-bottom: 12px;">
+        <button class="btn active" id="afBtn" onclick="toggleAf()">AF: Continuous</button>
+        <button class="btn" id="afSingleBtn" onclick="toggleAfSingle()">AF: Single</button>
+    </div>
+    
+    <div class="controls" style="margin-bottom: 12px;">
+        <button class="btn" onclick="setFocusRange('normal')" id="rangeNormal">Normal</button>
+        <button class="btn" onclick="setFocusRange('macro')" id="rangeMacro">Macro</button>
+    </div>
+    
+    <div class="controls">
+        <button class="btn preset-btn" id="preset0" onclick="presetAction(0)" ondblclick="presetSet(0)" oncontextmenu="event.preventDefault(); presetClear(0);">Preset 1</button>
+        <button class="btn preset-btn" id="preset1" onclick="presetAction(1)" ondblclick="presetSet(1)" oncontextmenu="event.preventDefault(); presetClear(1);">Preset 2</button>
+        <button class="btn preset-btn" id="preset2" onclick="presetAction(2)" ondblclick="presetSet(2)" oncontextmenu="event.preventDefault(); presetClear(2);">Preset 3</button>
+        <button class="btn preset-btn" id="preset3" onclick="presetAction(3)" ondblclick="presetSet(3)" oncontextmenu="event.preventDefault(); presetClear(3);">Preset 4</button>
+        <button class="btn full danger" onclick="center()">Center</button>
+    </div>
+    
+    <div class="status" id="status">Ready</div>
+    
+    <script>
+        let currentPan = 90, currentTilt = 90, currentZoom = 1, currentFocus = 50;
+        let autoFocus = true;
+        let afMode = 'continuous';
+        let focusRange = 'normal';
+        let exposureComp = 0;
+        let whiteBalance = 0;
+        let sharpness = 1.0;
+        let brightness = 0;
+        let contrast = 1.0;
+        let saturation = 1.0;
+        
+        const wbModes = ['Auto', 'Incandescent', 'Tungsten', 'Fluorescent', 'Indoor', 'Daylight', 'Cloudy', 'Cool White', 'Flash'];
+        
+        // Long press handling for presets
+        let longPressTimer = null;
+        const LONG_PRESS_DURATION = 500; // ms
+        
+        function getApiBase() {
+            const ip = document.getElementById('camIp').value.trim();
+            if (!ip) return ''; // Relative to current host
+            if (ip.startsWith('http')) return ip;
+            const parts = ip.split(':');
+            const host = parts[0];
+            const port = parts[1] || '5000';
+            return 'http://' + host + ':' + port;
+        }
+        
+        function saveCamIp() {
+            const ip = document.getElementById('camIp').value.trim();
+            localStorage.setItem('camIp', ip);
+            updateCamUrl();
+            updateStatus('IP Saved: ' + (ip || 'Local'), 'success');
+        }
+
+        function setIp(ip) {
+            document.getElementById('camIp').value = ip;
+            saveCamIp();
+        }
+
+        function loadCamIp() {
+            const savedIp = localStorage.getItem('camIp');
+            if (savedIp) {
+                document.getElementById('camIp').value = savedIp;
+            }
+        }
+        
+        function updateCamUrl() {
+            let base = getApiBase();
+            let streamPath = document.getElementById('streamUrl').value;
+            if (base) {
+                if (!base.endsWith('/')) base += '/';
+                if (streamPath.startsWith('/')) streamPath = streamPath.substring(1);
+                document.getElementById('streamFrame').src = base + streamPath;
+            } else {
+                document.getElementById('streamFrame').src = streamPath;
+            }
+            fetchStatus();
+        }
+        
+        function updateStatus(msg, type = '') {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = 'status ' + type;
+        }
+        
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const res = await fetch(getApiBase() + endpoint, { 
+                    method: options.method || 'GET', 
+                    body: options.body,
+                    credentials: 'include'
+                });
+                if (!res.ok) throw new Error(res.statusText);
+                return await res.json();
+            } catch (e) {
+                updateStatus('Error: ' + e.message, 'error');
+                return null;
+            }
+        }
+        
+        async function ptzMove(axis, delta) {
+            updateStatus('Moving...');
+            const data = axis === 'pan' 
+                ? { deltaPan: delta, deltaTilt: 0 }
+                : { deltaPan: 0, deltaTilt: delta };
+            const result = await apiCall('/api/ptz/move', { method: 'POST', body: JSON.stringify(data) });
+            if (result) {
+                currentPan = result.pan;
+                currentTilt = result.tilt;
+                updateSliders();
+                updateStatus('Pan: ' + result.pan + '°, Tilt: ' + result.tilt + '°', 'success');
+            }
+        }
+        
+        async function center() {
+            updateStatus('Centering...');
+            const result = await apiCall('/api/ptz/center', { method: 'POST' });
+            if (result) {
+                currentPan = result.pan;
+                currentTilt = result.tilt;
+                updateSliders();
+                updateStatus('Centered', 'success');
+            }
+        }
+        
+        async function setAngle(axis, angle) {
+            updateStatus('Setting ' + axis + '...');
+            const result = await apiCall('/api/ptz/' + axis + '/' + angle, { method: 'POST' });
+            if (result) {
+                if (result.pan !== undefined) currentPan = result.pan;
+                if (result.tilt !== undefined) currentTilt = result.tilt;
+                updateSliders();
+                updateStatus('Done', 'success');
+            }
+        }
+        
+        function updateSlider(axis) {
+            const slider = document.getElementById(axis + 'Slider');
+            const value = parseInt(slider.value);
+            if (axis === 'pan') {
+                document.getElementById('panValue').textContent = value + '°';
+                if (Math.abs(value - currentPan) > 2) setAngle('pan', value);
+            } else {
+                document.getElementById('tiltValue').textContent = value + '°';
+                if (Math.abs(value - currentTilt) > 2) setAngle('tilt', value);
+            }
+        }
+        
+        function updateSliders() {
+            document.getElementById('panSlider').value = currentPan;
+            document.getElementById('panValue').textContent = currentPan + '°';
+            document.getElementById('tiltSlider').value = currentTilt;
+            document.getElementById('tiltValue').textContent = currentTilt + '°';
+        }
+        
+        // Preset actions
+        async function presetAction(index) {
+            // Single press: load preset
+            if (presets[index]) {
+                currentPan = presets[index].pan;
+                currentTilt = presets[index].tilt;
+                updateSliders();
+                setAngle('pan', presets[index].pan);
+                setTimeout(() => setAngle('tilt', presets[index].tilt), 100);
+                updateStatus('Loaded Preset ' + (index + 1), 'success');
+            } else {
+                updateStatus('Preset ' + (index + 1) + ' is empty. Double-tap to set.', 'error');
+            }
+        }
+        
+        async function presetSet(index) {
+            // Double press: save current position to preset
+            const result = await apiCall('/api/ptz/presets/' + index, {
+                method: 'POST',
+                body: JSON.stringify({ pan: currentPan, tilt: currentTilt })
+            });
+            if (result) {
+                presets = result.presets;
+                updateStatus('Preset ' + (index + 1) + ' saved: Pan ' + currentPan + '°, Tilt ' + currentTilt + '°', 'success');
+            }
+        }
+        
+        async function presetClear(index) {
+            // Long press (or right-click): clear preset
+            const result = await apiCall('/api/ptz/presets/' + index, { method: 'DELETE' });
+            if (result) {
+                presets = result.presets;
+                updateStatus('Preset ' + (index + 1) + ' cleared', 'success');
+            }
+        }
+        
+        async function savePresets() {
+            // Handled by server
+        }
+        
+        function loadPresets() {
+            // Handled by server fetchStatus
+        }
+        
+        async function updateZoom() {
+            const slider = document.getElementById('zoomSlider');
+            const value = parseInt(slider.value);
+            document.getElementById('zoomValue').textContent = value + 'x';
+            if (Math.abs(value - currentZoom) > 0) {
+                const result = await apiCall('/api/ptz/zoom/' + value, { method: 'POST' });
+                if (result) {
+                    currentZoom = result.zoom;
+                    updateStatus('Zoom: ' + result.zoom + 'x', 'success');
+                }
+            }
+        }
+        
+        async function updateFocus() {
+            const slider = document.getElementById('focusSlider');
+            const value = parseInt(slider.value);
+            document.getElementById('focusValue').textContent = value;
+        }
+        
+        async function setFocus() {
+            const slider = document.getElementById('focusSlider');
+            const value = parseInt(slider.value);
+            if (Math.abs(value - currentFocus) > 2) {
+                const result = await apiCall('/api/ptz/focus/' + value, { method: 'POST' });
+                if (result) {
+                    currentFocus = result.focus;
+                    updateStatus('Focus: ' + result.focus, 'success');
+                }
+            }
+        }
+        
+        async function toggleAf() {
+            if (afMode === 'continuous') {
+                afMode = 'manual';
+                autoFocus = false;
+                document.getElementById('afBtn').classList.remove('active');
+                document.getElementById('afBtn').textContent = 'Manual';
+                document.getElementById('focusSlider').disabled = false;
+            } else {
+                afMode = 'continuous';
+                autoFocus = true;
+                document.getElementById('afBtn').classList.add('active');
+                document.getElementById('afBtn').textContent = 'AF: Continuous';
+                document.getElementById('afSingleBtn').classList.remove('active');
+                document.getElementById('focusSlider').disabled = true;
+            }
+            const result = await apiCall('/api/ptz/autofocus/' + afMode, { method: 'POST' });
+            updateStatus(afMode === 'manual' ? 'Manual focus' : 'Autofocus: ' + afMode, 'success');
+        }
+        
+        async function toggleAfSingle() {
+            if (afMode === 'single') {
+                afMode = 'manual';
+                autoFocus = false;
+                document.getElementById('afSingleBtn').classList.remove('active');
+                document.getElementById('afBtn').classList.remove('active');
+                document.getElementById('afBtn').textContent = 'Manual';
+                document.getElementById('focusSlider').disabled = false;
+            } else {
+                afMode = 'single';
+                autoFocus = false;
+                document.getElementById('afSingleBtn').classList.add('active');
+                document.getElementById('afBtn').classList.remove('active');
+                document.getElementById('afBtn').textContent = 'Manual';
+                document.getElementById('focusSlider').disabled = true;
+            }
+            const result = await apiCall('/api/ptz/autofocus/' + afMode, { method: 'POST' });
+            updateStatus(afMode === 'manual' ? 'Manual focus' : 'AF: Single', 'success');
+        }
+        
+        async function setFocusRange(range) {
+            document.getElementById('rangeNormal').classList.toggle('active', range === 'normal');
+            document.getElementById('rangeMacro').classList.toggle('active', range === 'macro');
+            const result = await apiCall('/api/ptz/focus-range/' + range, { method: 'POST' });
+            focusRange = range;
+            updateStatus('Focus range: ' + range, 'success');
+        }
+        
+        async function updateExposure() {
+            const slider = document.getElementById('exposureSlider');
+            const value = parseInt(slider.value);
+            document.getElementById('exposureValue').textContent = value > 0 ? '+' + value : value;
+        }
+        
+        async function setExposure() {
+            const slider = document.getElementById('exposureSlider');
+            const value = parseInt(slider.value);
+            const result = await apiCall('/api/ptz/exposure/' + value, { method: 'POST' });
+            if (result) {
+                exposureComp = result.exposurecomp;
+                updateStatus('Exposure: ' + (exposureComp > 0 ? '+' : '') + exposureComp, 'success');
+            }
+        }
+        
+        async function updateWb() {
+            const slider = document.getElementById('wbSlider');
+            const idx = parseInt(slider.value);
+            document.getElementById('wbValue').textContent = wbModes[idx] || 'Auto';
+        }
+        
+        async function setWb() {
+            const slider = document.getElementById('wbSlider');
+            const value = parseInt(slider.value);
+            const result = await apiCall('/api/ptz/whitebalance/' + value, { method: 'POST' });
+            if (result) {
+                whiteBalance = result.whitebalance;
+                document.getElementById('wbValue').textContent = wbModes[whiteBalance] || 'Auto';
+                updateStatus('White Balance: ' + wbModes[whiteBalance], 'success');
+            }
+        }
+        
+        async function updateSharpness() {
+            const slider = document.getElementById('sharpSlider');
+            const value = parseInt(slider.value) / 10;
+            document.getElementById('sharpValue').textContent = value.toFixed(1);
+        }
+        
+        async function setSharpness() {
+            const slider = document.getElementById('sharpSlider');
+            const value = parseInt(slider.value) / 10;
+            const result = await apiCall('/api/ptz/sharpness/' + value, { method: 'POST' });
+            if (result) {
+                sharpness = result.sharpness;
+                document.getElementById('sharpValue').textContent = sharpness.toFixed(1);
+                updateStatus('Sharpness: ' + sharpness.toFixed(1), 'success');
+            }
+        }
+        
+        async function updateBrightness() {
+            const slider = document.getElementById('brightSlider');
+            const value = parseInt(slider.value) / 10;
+            document.getElementById('brightValue').textContent = value > 0 ? '+' + value : value.toFixed(1);
+        }
+        
+        async function setBrightness() {
+            const slider = document.getElementById('brightSlider');
+            const value = parseInt(slider.value) / 10;
+            const result = await apiCall('/api/ptz/brightness/' + value, { method: 'POST' });
+            if (result) {
+                brightness = result.brightness;
+                document.getElementById('brightValue').textContent = brightness > 0 ? '+' + brightness : brightness.toFixed(1);
+                updateStatus('Brightness: ' + (brightness > 0 ? '+' : '') + brightness.toFixed(1), 'success');
+            }
+        }
+        
+        async function updateContrast() {
+            const slider = document.getElementById('contrastSlider');
+            const value = parseInt(slider.value) / 10;
+            document.getElementById('contrastValue').textContent = value.toFixed(1);
+        }
+        
+        async function setContrast() {
+            const slider = document.getElementById('contrastSlider');
+            const value = parseInt(slider.value) / 10;
+            const result = await apiCall('/api/ptz/contrast/' + value, { method: 'POST' });
+            if (result) {
+                contrast = result.contrast;
+                document.getElementById('contrastValue').textContent = contrast.toFixed(1);
+                updateStatus('Contrast: ' + contrast.toFixed(1), 'success');
+            }
+        }
+        
+        async function updateSaturation() {
+            const slider = document.getElementById('satSlider');
+            const value = parseInt(slider.value) / 10;
+            document.getElementById('satValue').textContent = value.toFixed(1);
+        }
+        
+        async function setSaturation() {
+            const slider = document.getElementById('satSlider');
+            const value = parseInt(slider.value) / 10;
+            const result = await apiCall('/api/ptz/saturation/' + value, { method: 'POST' });
+            if (result) {
+                saturation = result.saturation;
+                document.getElementById('satValue').textContent = saturation.toFixed(1);
+                updateStatus('Saturation: ' + saturation.toFixed(1), 'success');
+            }
+        }
+        
+        function syncAfState() {
+            const isAf = afMode === 'continuous' || afMode === 'single';
+            document.getElementById('afBtn').classList.toggle('active', afMode === 'continuous');
+            document.getElementById('afSingleBtn').classList.toggle('active', afMode === 'single');
+            document.getElementById('afBtn').textContent = isAf ? 'AF: ' + afMode : 'Manual';
+            document.getElementById('focusSlider').disabled = isAf;
+        }
+        
+        async function fetchStatus() {
+            const result = await apiCall('/api/ptz/status');
+            if (result) {
+                currentPan = result.pan;
+                currentTilt = result.tilt;
+                currentZoom = result.zoom || 1;
+                currentFocus = result.focus || 50;
+                autoFocus = result.autofocus !== false;
+                afMode = result.afmode || 'continuous';
+                focusRange = result.focusrange || 'normal';
+                exposureComp = result.exposurecomp || 0;
+                whiteBalance = result.whitebalance || 0;
+                sharpness = result.sharpness || 1.0;
+                brightness = result.brightness || 0;
+                contrast = result.contrast || 1.0;
+                saturation = result.saturation || 1.0;
+                if (result.presets) presets = result.presets;
+                updateSliders();
+                document.getElementById('zoomSlider').value = currentZoom;
+                document.getElementById('zoomValue').textContent = currentZoom + 'x';
+                document.getElementById('focusSlider').value = currentFocus;
+                document.getElementById('focusValue').textContent = currentFocus;
+                document.getElementById('exposureSlider').value = exposureComp;
+                document.getElementById('exposureValue').textContent = exposureComp > 0 ? '+' + exposureComp : exposureComp;
+                document.getElementById('wbSlider').value = whiteBalance;
+                document.getElementById('wbValue').textContent = wbModes[whiteBalance] || 'Auto';
+                document.getElementById('sharpSlider').value = Math.round(sharpness * 10);
+                document.getElementById('sharpValue').textContent = sharpness.toFixed(1);
+                document.getElementById('brightSlider').value = Math.round(brightness * 10);
+                document.getElementById('brightValue').textContent = brightness > 0 ? '+' + brightness : brightness.toFixed(1);
+                document.getElementById('contrastSlider').value = Math.round(contrast * 10);
+                document.getElementById('contrastValue').textContent = contrast.toFixed(1);
+                document.getElementById('satSlider').value = Math.round(saturation * 10);
+                document.getElementById('satValue').textContent = saturation.toFixed(1);
+                syncAfState();
+                document.getElementById('rangeNormal').classList.toggle('active', focusRange === 'normal');
+                document.getElementById('rangeMacro').classList.toggle('active', focusRange === 'macro');
+            }
+        }
+        
+        loadCamIp();
+        updateCamUrl();
+        
+        // Load saved presets on startup
+        loadPresets();
+        fetchStatus();
+        setInterval(fetchStatus, 2000);
+    </script>
+</body>
+</html>

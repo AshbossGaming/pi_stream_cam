@@ -1,0 +1,26 @@
+com.picam.android.app-core-runtime-2.2.0-0 C:\Users\ash12\.gradle\caches\9.5.0\transforms\0dd06786891bd3131618937bfc12801e\transformed\core-runtime-2.2.0\res
+com.picam.android.app-jetified-core-ktx-1.13.0-1 C:\Users\ash12\.gradle\caches\9.5.0\transforms\0de5176ee97c4624e7668b17593a97d4\transformed\jetified-core-ktx-1.13.0\res
+com.picam.android.app-jetified-startup-runtime-1.1.1-2 C:\Users\ash12\.gradle\caches\9.5.0\transforms\17006c38fdfe8b13c7a0f45b06728d27\transformed\jetified-startup-runtime-1.1.1\res
+com.picam.android.app-lifecycle-livedata-core-2.6.2-3 C:\Users\ash12\.gradle\caches\9.5.0\transforms\1d6f289af2f6ddc1fd8f95a2e8c59276\transformed\lifecycle-livedata-core-2.6.2\res
+com.picam.android.app-lifecycle-runtime-2.6.2-4 C:\Users\ash12\.gradle\caches\9.5.0\transforms\38ba7da5e66be1036c9e3bf7850a5eac\transformed\lifecycle-runtime-2.6.2\res
+com.picam.android.app-jetified-appcompat-resources-1.7.0-5 C:\Users\ash12\.gradle\caches\9.5.0\transforms\49cd2f044bc021f7fc97eeb996763484\transformed\jetified-appcompat-resources-1.7.0\res
+com.picam.android.app-lifecycle-livedata-2.6.2-6 C:\Users\ash12\.gradle\caches\9.5.0\transforms\5fbd96bfc663dc0eebaee55ae2df199a\transformed\lifecycle-livedata-2.6.2\res
+com.picam.android.app-jetified-annotation-experimental-1.4.0-7 C:\Users\ash12\.gradle\caches\9.5.0\transforms\677b436ad6f866e813708c95060da8f8\transformed\jetified-annotation-experimental-1.4.0\res
+com.picam.android.app-jetified-profileinstaller-1.3.1-8 C:\Users\ash12\.gradle\caches\9.5.0\transforms\7452fc58dc16e6b0025fb3c3e020762c\transformed\jetified-profileinstaller-1.3.1\res
+com.picam.android.app-jetified-savedstate-1.2.1-9 C:\Users\ash12\.gradle\caches\9.5.0\transforms\830e2c1a182738031a88534f6b4d66bb\transformed\jetified-savedstate-1.2.1\res
+com.picam.android.app-core-1.13.0-10 C:\Users\ash12\.gradle\caches\9.5.0\transforms\8f507e6d191bc44ba75bc2d92cb54d4f\transformed\core-1.13.0\res
+com.picam.android.app-jetified-activity-1.7.0-11 C:\Users\ash12\.gradle\caches\9.5.0\transforms\a0cb7f12418a2555f7493f1e1cfec747\transformed\jetified-activity-1.7.0\res
+com.picam.android.app-appcompat-1.7.0-12 C:\Users\ash12\.gradle\caches\9.5.0\transforms\a8c7d768dfe3a70c0ddb442bdb270038\transformed\appcompat-1.7.0\res
+com.picam.android.app-jetified-emoji2-views-helper-1.3.0-13 C:\Users\ash12\.gradle\caches\9.5.0\transforms\acbf2425fcf10ba28093d23b36f3dddb\transformed\jetified-emoji2-views-helper-1.3.0\res
+com.picam.android.app-lifecycle-viewmodel-2.6.2-14 C:\Users\ash12\.gradle\caches\9.5.0\transforms\ca373a3b7db11326b5921311ed194ec9\transformed\lifecycle-viewmodel-2.6.2\res
+com.picam.android.app-jetified-emoji2-1.3.0-15 C:\Users\ash12\.gradle\caches\9.5.0\transforms\cf91b01e71402cd59ac1999121293a33\transformed\jetified-emoji2-1.3.0\res
+com.picam.android.app-jetified-lifecycle-viewmodel-savedstate-2.6.2-16 C:\Users\ash12\.gradle\caches\9.5.0\transforms\d07a348f6e9e130b7bd2d797757e3b56\transformed\jetified-lifecycle-viewmodel-savedstate-2.6.2\res
+com.picam.android.app-jetified-lifecycle-process-2.6.2-17 C:\Users\ash12\.gradle\caches\9.5.0\transforms\eb1ead34f3654a5640d78e66fba23e65\transformed\jetified-lifecycle-process-2.6.2\res
+com.picam.android.app-fragment-1.5.4-18 C:\Users\ash12\.gradle\caches\9.5.0\transforms\f99417da56596b48be0ce5d75c9bcca3\transformed\fragment-1.5.4\res
+com.picam.android.app-pngs-19 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\build\generated\res\pngs\debug
+com.picam.android.app-resValues-20 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\build\generated\res\resValues\debug
+com.picam.android.app-packageDebugResources-21 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.picam.android.app-packageDebugResources-22 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.picam.android.app-debug-23 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\build\intermediates\merged_res\debug\mergeDebugResources
+com.picam.android.app-debug-24 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\src\debug\res
+com.picam.android.app-main-25 C:\Users\ash12\RiderProjects\pi stream cam\PiCamAndroid\app\src\main\res

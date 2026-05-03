@@ -1,0 +1,6 @@
+@pi_stream_cam_HostAddress = http://localhost:5000
+
+GET {{pi_stream_cam_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
