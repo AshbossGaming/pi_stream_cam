@@ -123,6 +123,30 @@ sudo systemctl start pi-stream-cam      # Start service
 sudo journalctl -u pi-stream-cam -f    # View logs
 ```
 
+## Adding Stream to OBS
+
+### 1. Identify your Stream URL
+Based on the configuration, the MJPEG stream is served at:
+- **Cam 1:** `http://192.168.100.203:5000/api/stream/mjpeg`
+- **Cam 2:** `http://192.168.100.204:5000/api/stream/mjpeg`
+
+*Note: Replace the IP address with your Raspberry Pi's actual IP if it differs.*
+
+### 2. Add as a Browser Source (Recommended)
+1. Open OBS Studio.
+2. In the **Sources** dock, click **+** and select **Browser**.
+3. Name it (e.g., "Pi Cam 1").
+4. In **URL**, paste your stream URL.
+5. Set **Width** and **Height** (e.g., `1280` x `720`).
+6. Click **OK**.
+
+### 3. Alternative: Media Source
+1. Click **+** in **Sources** and select **Media Source**.
+2. Uncheck **Local File**.
+3. In **Input**, paste your stream URL.
+4. Set **Input Format** to `mjpeg`.
+5. Click **OK**.
+
 ## Troubleshooting
 
 - **Camera not found**: Ensure camera is enabled in `raspi-config`
