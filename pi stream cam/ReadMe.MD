@@ -8,14 +8,14 @@ A Raspberry Pi-based PTZ (Pan-Tilt-Zoom) surveillance camera system with web-bas
 - **PTZ control** — pan (0–180°) and tilt (0–180°) via MG90S servos driven by a PCA9685 PWM controller over I2C
 - **4 PTZ presets** — save and recall camera positions
 - **Camera tuning** — zoom (1–8x digital), focus, autofocus modes, exposure compensation, white balance, sharpness, brightness, contrast, saturation, JPEG quality, video flip
-- **Video recording** — H.264 hardware-encoded MP4 via GStreamer
-- **High-resolution snapshots** — up to 1920×1080 JPEG
+ - **Video recording** — H.264 hardware-encoded via rpicam-vid
+- **High-resolution snapshots** — up to 1920×1080 JPEG via rpicam-jpeg
 - **Secure access** — cookie-based authentication for the web UI, API key for the mobile app
 - **State persistence** — camera and PTZ settings saved to JSON and restored on restart
 - **Dual-camera support** — Cam 1 (192.168.100.203) and Cam 2 (192.168.100.204)
 - **ESP32 physical controller** — hardware panel with joystick, zoom dial, OLED display, and preset buttons
 - **Android app** — simple WebView wrapper around the mobile web UI
-- **Systemd service** — auto-start with resource limits (256 MB RAM, CPU weight 20)
+- **Systemd service** — auto-start with resource limits (384 MB RAM, CPU weight 20)
 
 ## Quick Start
 
@@ -47,7 +47,13 @@ cd publish
 sudo bash scripts/deploy.sh
 ```
 
-This installs GStreamer dependencies, sets up the systemd service, and starts the camera.
+The deploy script:
+1. Installs `libcamera-apps` (provides rpicam-vid and rpicam-jpeg for camera capture)
+2. Creates the directory structure (`/opt/pi-stream-cam/releases/`, `/var/lib/pi-stream-cam/recordings/`, `/var/log/pi-stream-cam`)
+3. Copies the release to a timestamped directory (e.g. `/opt/pi-stream-cam/releases/20250101120000/`)
+4. Installs the systemd service unit and enables it
+5. Stops any running instance, activates the new release via symlink (`/opt/pi-stream-cam/current`), and starts the service
+6. Prunes old releases, keeping the last 3
 
 ### Access
 
@@ -63,7 +69,7 @@ pi stream cam/
 │   ├── PtzController.cs     — PTZ control endpoints
 │   └── StreamController.cs  — MJPEG stream, snapshot, recording endpoints
 ├── Services/
-│   ├── CameraService.cs     — GStreamer capture loop and recording
+│   ├── CameraService.cs     — rpicam-vid capture loop, autofocus, and recording
 │   ├── ServoService.cs      — PCA9685 servo control and presets
 │   └── VersionInfo.cs       — Assembly version
 ├── Models/

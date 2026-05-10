@@ -18,8 +18,12 @@ IOSchedulingClass=idle
 IOSchedulingPriority=7
 CPUWeight=20
 AllowedCPUs=1-2
-MemoryMax=256M
-MemoryHigh=192M
+MemoryMax=384M
+MemoryHigh=256M
+StateDirectory=pi-stream-cam
+StateDirectoryMode=0755
+LogsDirectory=pi-stream-cam
+LogsDirectoryMode=0755
 StandardOutput=journal
 StandardError=journal
 Environment=ASPNETCORE_ENVIRONMENT=Production

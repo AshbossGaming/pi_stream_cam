@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 
@@ -9,6 +10,7 @@ public class CameraService : IDisposable
 {
     private readonly bool _hasCamera;
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _frameSignal = new(0, 1);
     private byte[]? _latestFrame;
     private CancellationTokenSource? _captureCts;
     private CancellationTokenSource? _restartCts;
@@ -27,6 +29,8 @@ public class CameraService : IDisposable
     private int _quality = 85;
     private bool _videoFlipped;
 
+    private static readonly string[] AwbPresets = { "auto", "incandescent", "tungsten", "fluorescent", "daylight", "cloudy", "shade", "custom" };
+
     private readonly string _stateFile = "/var/lib/pi-stream-cam/camera-state.json";
 
     public int Zoom => _zoom;
@@ -43,6 +47,7 @@ public class CameraService : IDisposable
     public int Quality => _quality;
     public bool IsCapturing => _captureCts != null && !_captureCts.IsCancellationRequested;
     public bool VideoFlipped => _videoFlipped;
+    public SemaphoreSlim FrameSignal => _frameSignal;
 
     private Process? _captureProcess;
 
@@ -58,18 +63,11 @@ public class CameraService : IDisposable
     public int CurrentFps => _fps;
     public TimeSpan Uptime => IsCapturing ? DateTime.UtcNow - _captureStartTime : TimeSpan.Zero;
 
-    private Process? _recordProcess;
-    private string? _recordingPath;
-    private readonly object _recordLock = new();
-
-    public bool IsRecording => _recordProcess != null && !_recordProcess.HasExited;
-    public string? RecordingPath => _recordingPath;
-
     public CameraService()
     {
         _hasCamera =
             RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-            File.Exists("/usr/bin/gst-launch-1.0");
+            File.Exists("/usr/bin/rpicam-vid");
 
         LoadState();
     }
@@ -87,9 +85,7 @@ public class CameraService : IDisposable
                 fps = CurrentFps,
                 uptimeSeconds = Uptime.TotalSeconds,
                 width = _captureProcess != null ? 1280 : 0,
-                height = _captureProcess != null ? 720 : 0,
-                recording = IsRecording,
-                recordingPath = RecordingPath
+                height = _captureProcess != null ? 720 : 0
             };
         }
     }
@@ -197,6 +193,7 @@ public class CameraService : IDisposable
         _zoom = Math.Clamp(level, 1, 8);
         Console.WriteLine($"Zoom set: {_zoom}x");
         SaveState();
+        RestartCapture();
     }
 
     public void SetFocus(int value)
@@ -207,6 +204,7 @@ public class CameraService : IDisposable
 
         Console.WriteLine($"Focus set: {_focus}");
         SaveState();
+        RestartCapture();
     }
 
     public void EnableAutofocus(string mode = "continuous")
@@ -216,6 +214,7 @@ public class CameraService : IDisposable
 
         Console.WriteLine($"Autofocus enabled: {_afMode}");
         SaveState();
+        RestartCapture();
     }
 
     public void DisableAutofocus()
@@ -225,6 +224,7 @@ public class CameraService : IDisposable
 
         Console.WriteLine("Autofocus disabled");
         SaveState();
+        RestartCapture();
     }
 
     public void SetAfMode(string mode)
@@ -235,6 +235,7 @@ public class CameraService : IDisposable
             _afMode = mode;
             Console.WriteLine($"AF mode: {_afMode}");
             SaveState();
+            RestartCapture();
         }
     }
 
@@ -243,6 +244,7 @@ public class CameraService : IDisposable
         _focusRange = range;
         Console.WriteLine($"Focus range: {_focusRange}");
         SaveState();
+        RestartCapture();
     }
 
     public void SetExposureCompensation(int value)
@@ -413,197 +415,89 @@ public class CameraService : IDisposable
         {
         }
 
-        StopRecording();
-
         _captureProcess = null;
         _captureCts = null;
     }
 
-    public byte[]? CaptureSnapshot(int width = 1920, int height = 1080)
-    {
-        if (!_hasCamera)
-            return null;
-
-        try
-        {
-            var wasCapturing = IsCapturing;
-            if (wasCapturing)
-                StopCapture();
-
-            Thread.Sleep(300);
-
-            var pipeline = $"""
-                libcamerasrc num-buffers=1 !
-                video/x-raw,width={width},height={height},framerate=30/1 !
-                videoconvert !
-                jpegenc quality={_quality} !
-                fdsink fd=1 sync=false
-                """;
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "gst-launch-1.0",
-                Arguments = $"-q {pipeline}",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            psi.EnvironmentVariables["GST_DEBUG"] = "0";
-
-            using var process = Process.Start(psi);
-            if (process == null)
-                return null;
-
-            using var ms = new MemoryStream();
-            process.StandardOutput.BaseStream.CopyTo(ms);
-            process.WaitForExit(5000);
-
-            var frame = ms.ToArray();
-
-            if (wasCapturing)
-                StartCapture();
-
-            return frame.Length > 0 ? frame : null;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Snapshot error: {ex.Message}");
-            return null;
-        }
-    }
-
-    public bool StartRecording(string outputPath, int width = 1280, int height = 720, int framerate = 30)
-    {
-        lock (_recordLock)
-        {
-            if (IsRecording)
-                return false;
-
-            if (!_hasCamera)
-                return false;
-
-            try
-            {
-                var wasCapturing = IsCapturing;
-                if (wasCapturing)
-                    StopCapture();
-
-                Thread.Sleep(300);
-
-                var dir = Path.GetDirectoryName(outputPath)!;
-                if (!Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
-
-                var pipeline = $"""
-                    libcamerasrc !
-                    video/x-raw,width={width},height={height},framerate={framerate}/1 !
-                    videoconvert !
-                    v4l2h264enc extra-controls="encode,h264_i_frame_period=30" !
-                    h264parse !
-                    mp4mux !
-                    filesink location={outputPath}
-                    """;
-
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "gst-launch-1.0",
-                    Arguments = $"-e {pipeline}",
-                    UseShellExecute = false,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                psi.EnvironmentVariables["GST_DEBUG"] = "0";
-
-                _recordProcess = Process.Start(psi);
-                _recordingPath = outputPath;
-
-                if (_recordProcess == null)
-                    return false;
-
-                _recordProcess.ErrorDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Console.WriteLine($"rec: {e.Data}");
-                };
-                _recordProcess.BeginErrorReadLine();
-
-                Console.WriteLine($"[Camera] Recording started: {outputPath}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Record start error: {ex.Message}");
-                return false;
-            }
-        }
-    }
-
-    public string? StopRecording()
-    {
-        lock (_recordLock)
-        {
-            if (_recordProcess == null || _recordProcess.HasExited)
-            {
-                _recordingPath = null;
-                return null;
-            }
-
-            try
-            {
-                Console.WriteLine("[Camera] Stopping recording...");
-                _recordProcess.StandardInput.Close();
-                _recordProcess.WaitForExit(5000);
-
-                if (!_recordProcess.HasExited)
-                    _recordProcess.Kill(true);
-            }
-            catch
-            {
-            }
-            finally
-            {
-                _recordProcess.Dispose();
-                _recordProcess = null;
-            }
-
-            var path = _recordingPath;
-            _recordingPath = null;
-
-            if (!IsCapturing)
-                StartCapture();
-
-            Console.WriteLine($"[Camera] Recording stopped: {path}");
-            return path;
-        }
-    }
-
-    private string BuildGstPipeline(
+    private string[] BuildRpicamVidArgs(
         int width,
         int height,
         int framerate)
     {
-        var pipeline = new List<string>();
-
-        pipeline.Add("libcamerasrc");
-
-        pipeline.Add(
-            $"! video/x-raw,width={width},height={height},framerate={framerate}/1");
-
-        if (_videoFlipped)
+        var args = new List<string>
         {
-            pipeline.Add("! videoflip method=vertical-flip");
+            "--codec", "mjpeg",
+            "--output", "-",
+            "--width", width.ToString(),
+            "--height", height.ToString(),
+            "--framerate", framerate.ToString(),
+            "--quality", _quality.ToString(),
+            "--timeout", "0"
+        };
+
+        if (_zoom > 1)
+        {
+            double size = 1.0 / _zoom;
+            double offset = (1.0 - size) / 2.0;
+            args.Add("--roi");
+            args.Add($"{offset:F4},{offset:F4},{size:F4},{size:F4}");
         }
 
-        pipeline.Add("! videoconvert");
+        args.Add("--autofocus-mode");
+        args.Add(_afMode);
 
-        pipeline.Add($"! jpegenc quality={_quality}");
+        if (_afMode == "manual")
+        {
+            args.Add("--lens-position");
+            args.Add((_focus / 100.0).ToString("F2", CultureInfo.InvariantCulture));
+        }
 
-        pipeline.Add("! fdsink fd=1 sync=false");
+        if (_focusRange == "macro")
+        {
+            args.Add("--autofocus-range");
+            args.Add("macro");
+        }
 
-        return string.Join(" ", pipeline);
+        if (_exposureComp != 0)
+        {
+            args.Add("--ev");
+            args.Add(_exposureComp.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (_whiteBalance >= 0 && _whiteBalance < AwbPresets.Length)
+        {
+            args.Add("--awb");
+            args.Add(AwbPresets[_whiteBalance]);
+        }
+
+        if (Math.Abs(_sharpness - 1.0) > 0.01)
+        {
+            args.Add("--sharpness");
+            args.Add(_sharpness.ToString("F2", CultureInfo.InvariantCulture));
+        }
+
+        if (_brightness != 0)
+        {
+            args.Add("--brightness");
+            args.Add(_brightness.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (_contrast != 1)
+        {
+            args.Add("--contrast");
+            args.Add(_contrast.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (_saturation != 1)
+        {
+            args.Add("--saturation");
+            args.Add(_saturation.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (_videoFlipped)
+            args.Add("--vflip");
+
+        return args.ToArray();
     }
 
     private async Task CaptureLoop(
@@ -619,24 +513,22 @@ public class CameraService : IDisposable
         {
             try
             {
-                var pipeline = BuildGstPipeline(
+                var args = BuildRpicamVidArgs(
                     width,
                     height,
                     framerate);
 
-                Console.WriteLine($"[GST] {pipeline}");
+                Console.WriteLine($"[RPICAM] rpicam-vid {string.Join(" ", args)}");
 
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "gst-launch-1.0",
-                    Arguments = $"-q {pipeline}",
+                    FileName = "rpicam-vid",
+                    Arguments = string.Join(" ", args),
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
-                };
-
-                psi.EnvironmentVariables["GST_DEBUG"] = "2";
+ };
 
                 var process = Process.Start(psi);
 
@@ -688,6 +580,8 @@ public class CameraService : IDisposable
                             {
                                 _latestFrame = frame;
                             }
+
+                            try { _frameSignal.Release(); } catch (SemaphoreFullException) { }
 
                             Interlocked.Increment(ref _frameCount);
 
@@ -747,66 +641,56 @@ public class CameraService : IDisposable
     {
         try
         {
-            byte[] buffer = new byte[1024 * 1024];
+            var stream = reader.BaseStream;
+            byte[] buf = new byte[8192];
+            int prev = -1;
 
-            int idx = 0;
-
+            // Scan for SOI marker (0xFF 0xD8) using buffered reads
             while (true)
             {
-                int b = reader.ReadByte();
+                int bytesRead = stream.Read(buf, 0, buf.Length);
+                if (bytesRead == 0) return null;
 
-                if (b == -1)
-                    return null;
-
-                if (b == 0xFF)
+                for (int i = 0; i < bytesRead; i++)
                 {
-                    b = reader.ReadByte();
-
-                    if (b == -1)
-                        return null;
-
-                    if (b == 0xD8)
+                    if (prev == 0xFF && buf[i] == 0xD8)
                     {
-                        buffer[idx++] = 0xFF;
-                        buffer[idx++] = 0xD8;
-                        break;
-                    }
-                }
-            }
+                        using var ms = new MemoryStream(262144);
+                        ms.WriteByte(0xFF);
+                        ms.WriteByte(0xD8);
+                        ms.Write(buf, i + 1, bytesRead - i - 1);
 
-            bool foundEoi = false;
+                        // Continue reading and scanning for EOI (0xFF 0xD9)
+                        prev = -1;
+                        while (ms.Length < 1048576)
+                        {
+                            int br = stream.Read(buf, 0, buf.Length);
+                            if (br == 0) return null;
 
-            while (!foundEoi && idx < buffer.Length)
-            {
-                int b = reader.ReadByte();
+                            int eoiPos = -1;
+                            for (int j = 0; j < br; j++)
+                            {
+                                if (prev == 0xFF && buf[j] == 0xD9)
+                                {
+                                    eoiPos = j + 1;
+                                    break;
+                                }
+                                prev = buf[j];
+                            }
 
-                if (b == -1)
-                    return null;
+                            if (eoiPos >= 0)
+                            {
+                                ms.Write(buf, 0, eoiPos);
+                                return ms.ToArray();
+                            }
 
-                buffer[idx++] = (byte)b;
-
-                if (b == 0xFF)
-                {
-                    b = reader.ReadByte();
-
-                    if (b == -1)
+                            ms.Write(buf, 0, br);
+                        }
                         return null;
-
-                    buffer[idx++] = (byte)b;
-
-                    if (b == 0xD9)
-                        foundEoi = true;
+                    }
+                    prev = buf[i];
                 }
             }
-
-            if (!foundEoi)
-                return null;
-
-            var frame = new byte[idx];
-
-            Array.Copy(buffer, frame, idx);
-
-            return frame;
         }
         catch
         {
@@ -817,7 +701,6 @@ public class CameraService : IDisposable
     public void Dispose()
     {
         _restartCts?.Cancel();
-        StopRecording();
         StopCapture();
     }
 }

@@ -242,9 +242,7 @@ app.MapGet("/api/status", () =>
             contrast = camera.Contrast,
             saturation = camera.Saturation,
             quality = camera.Quality,
-            videoFlipped = camera.VideoFlipped,
-            recording = camera.IsRecording,
-            recordingPath = camera.RecordingPath
+            videoFlipped = camera.VideoFlipped
         },
 
         ptz = new

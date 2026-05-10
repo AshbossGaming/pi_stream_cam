@@ -15,16 +15,10 @@ RECORDINGS_DIR="/var/lib/pi-stream-cam/recordings"
 echo "Setting up Pi Stream Cam service..."
 echo "Release ID: $RELEASE_ID"
 
-echo "Installing GStreamer and libcamera dependencies..."
+echo "Installing libcamera dependencies..."
 sudo apt-get update -qq
 sudo apt-get install -y -qq \
-    gstreamer1.0-tools \
-    gstreamer1.0-libcamera \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-base \
-    libcamera-dev \
-    libcamera-v4l2
+    libcamera-apps
 
 echo "Creating directory structure..."
 sudo mkdir -p "$RELEASE_DIR"
