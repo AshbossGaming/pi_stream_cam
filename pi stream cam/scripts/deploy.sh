@@ -13,6 +13,16 @@ SERVICE_PATH="/etc/systemd/system/pi-stream-cam.service"
 
 echo "Setting up Pi Stream Cam service..."
 
+echo "Installing GStreamer and libcamera dependencies..."
+sudo apt-get update -qq
+sudo apt-get install -y -qq \
+    gstreamer1.0-tools \
+    gstreamer1.0-libcamera \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    libcamera-dev \
+    libcamera-v4l2
+
 if ! id -u picam &>/dev/null; then
     sudo useradd -r -s /bin/false picam
 fi
@@ -52,3 +62,5 @@ echo "Make sure to:"
 echo "  1. Enable camera interface: sudo raspi-config (Interface Options > Camera)"
 echo "  2. Enable I2C: sudo raspi-config (Interface Options > I2C)"
 echo "  3. Reboot after enabling interfaces"
+echo ""
+echo "Camera pipeline now uses: gst-launch-1.0 + libcamerasrc (was rpicam-vid)"

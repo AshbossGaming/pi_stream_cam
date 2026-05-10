@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 
@@ -6,7 +7,7 @@ namespace pi_stream_cam.Services;
 
 public class CameraService : IDisposable
 {
-    private readonly bool _isRaspberryPi;
+    private readonly bool _hasCamera;
     private readonly object _lock = new();
     private byte[]? _latestFrame;
     private CancellationTokenSource? _captureCts;
@@ -46,12 +47,9 @@ public class CameraService : IDisposable
     public CameraService(string cameraId = "imx519")
     {
         _cameraId = cameraId;
-        _isRaspberryPi = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-                         (Directory.Exists("/dev/video0") || 
-                          File.Exists("/usr/bin/libcamera-vid") || 
-                          File.Exists("/usr/bin/rpicam-vid") ||
-                          File.Exists("/usr/bin/libcamera-still"));
-        
+        _hasCamera = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
+                     File.Exists("/usr/bin/gst-launch-1.0");
+
         LoadState();
     }
 
@@ -345,9 +343,9 @@ public class CameraService : IDisposable
 
     public void StartCapture(int width = 1280, int height = 720, int framerate = 30)
     {
-        if (!_isRaspberryPi)
+        if (!_hasCamera)
         {
-            Console.WriteLine("Camera capture only available on Raspberry Pi");
+            Console.WriteLine("Camera capture requires gst-launch-1.0 with libcamerasrc");
             return;
         }
 
@@ -373,36 +371,35 @@ public class CameraService : IDisposable
         _captureCts = null;
     }
 
-    private string BuildRpicamArgs(int width, int height, int framerate)
+    private string BuildGstPipeline(int width, int height, int framerate)
     {
-        var args = $"-t 0 --inline --width {width} --height {height} --framerate {framerate} --codec mjpeg -o -";
-
-        if (_quality < 100)
-            args += $" --quality {_quality}";
+        var srcProps = new List<string> { $"camera-name={_cameraId}" };
 
         if (Math.Abs(_sharpness - 1.0) > 0.01)
-            args += $" --sharpness {_sharpness:F1}";
+            srcProps.Add($"sharpness={_sharpness:F1}");
 
         if (_contrast != 1)
-            args += $" --contrast {_contrast}";
+            srcProps.Add($"contrast={_contrast}");
 
         if (_brightness != 0)
-            args += $" --brightness {_brightness}";
+            srcProps.Add($"brightness={_brightness}");
 
         if (_saturation != 1)
-            args += $" --saturation {_saturation}";
+            srcProps.Add($"saturation={_saturation}");
 
         if (_exposureComp != 0)
-            args += $" --ev {_exposureComp}";
+            srcProps.Add($"exposure-compensation={_exposureComp}");
 
         var wb = GetWbValue(_whiteBalance);
         if (wb != "auto")
-            args += $" --awb {wb}";
+            srcProps.Add($"awb-mode={wb}");
 
         if (_videoFlipped)
-            args += " --vflip";
+            srcProps.Add("flip-vertical=true");
 
-        return args;
+        var propsStr = string.Join(" ", srcProps);
+
+        return $"libcamerasrc {propsStr} ! video/x-raw,width={width},height={height},framerate={framerate}/1 ! videoconvert ! jpegenc quality={_quality} ! fdsink fd=1 sync=false";
     }
 
     private async Task CaptureLoop(int width, int height, int framerate, CancellationToken token)
@@ -413,13 +410,14 @@ public class CameraService : IDisposable
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "rpicam-vid",
-                    Arguments = BuildRpicamArgs(width, height, framerate),
+                    FileName = "gst-launch-1.0",
+                    Arguments = $"-q {BuildGstPipeline(width, height, framerate)}",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
+                psi.EnvironmentVariables["GST_DEBUG"] = "0";
 
                 var process = Process.Start(psi);
                 if (process == null)
@@ -432,7 +430,7 @@ public class CameraService : IDisposable
                 process.ErrorDataReceived += (_, e) =>
                 {
                     if (!string.IsNullOrWhiteSpace(e.Data))
-                        Console.WriteLine($"rpicam-vid: {e.Data}");
+                        Console.WriteLine($"gst-launch-1.0: {e.Data}");
                 };
                 process.BeginErrorReadLine();
 

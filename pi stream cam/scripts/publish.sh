@@ -20,5 +20,7 @@ else
 fi
 
 echo ""
+echo "Note: Requires gstreamer1.0-libcamera on the Pi (installed by deploy.sh)"
+echo ""
 echo "Done! Copy the 'publish' folder to your Raspberry Pi."
 echo "Then on the Pi, run: sudo bash scripts/deploy.sh"
