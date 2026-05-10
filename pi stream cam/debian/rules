@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	dotnet publish -c Release -r linux-arm64 --self-contained \
+	  -o debian/pi-stream-cam/usr/lib/pi-stream-cam
+
+override_dh_auto_install:
+	# Install service file
+	install -D -m 644 scripts/pi-stream-cam.service \
+	  debian/pi-stream-cam/lib/systemd/system/pi-stream-cam.service
+	# Install VERSION file
+	install -D -m 644 ../VERSION \
+	  debian/pi-stream-cam/usr/lib/pi-stream-cam/VERSION
+	# Install scripts
+	install -D -m 755 scripts/rpi_debug.sh \
+	  debian/pi-stream-cam/usr/share/pi-stream-cam/rpi_debug.sh
+	install -D -m 755 scripts/rpi_measure.sh \
+	  debian/pi-stream-cam/usr/share/pi-stream-cam/rpi_measure.sh
+	install -D -m 755 scripts/dump_cameras.sh \
+	  debian/pi-stream-cam/usr/share/pi-stream-cam/dump_cameras.sh
+
+override_dh_strip:
+	dh_strip --keep-debug

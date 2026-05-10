@@ -52,4 +52,67 @@ public class StreamController : ControllerBase
             _logger.LogDebug(ex, "MJPEG stream disconnected");
         }
     }
+
+    [HttpGet("snapshot")]
+    public IActionResult GetSnapshot()
+    {
+        var frame = _cameraService.GetCurrentFrame();
+        if (frame == null)
+            return NotFound(new { error = "No frame available" });
+
+        return File(frame, "image/jpeg");
+    }
+
+    [Authorize]
+    [HttpGet("snapshot/highres")]
+    public IActionResult GetHighResSnapshot(int width = 1920, int height = 1080)
+    {
+        var frame = _cameraService.CaptureSnapshot(width, height);
+        if (frame == null)
+            return StatusCode(500, new { error = "Failed to capture snapshot" });
+
+        return File(frame, "image/jpeg");
+    }
+
+    [Authorize]
+    [HttpPost("record/start")]
+    public IActionResult StartRecording([FromQuery] string? filename = null)
+    {
+        if (_cameraService.IsRecording)
+            return BadRequest(new { error = "Already recording", path = _cameraService.RecordingPath });
+
+        var path = filename;
+        if (string.IsNullOrEmpty(path))
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            path = $"/var/lib/pi-stream-cam/recordings/{timestamp}.mp4";
+        }
+
+        var ok = _cameraService.StartRecording(path);
+        if (!ok)
+            return StatusCode(500, new { error = "Failed to start recording" });
+
+        return Ok(new { recording = true, path });
+    }
+
+    [Authorize]
+    [HttpPost("record/stop")]
+    public IActionResult StopRecording()
+    {
+        var path = _cameraService.StopRecording();
+        return Ok(new { recording = false, path });
+    }
+
+    [Authorize]
+    [HttpGet("record/status")]
+    public IActionResult RecordingStatus()
+    {
+        return Ok(new
+        {
+            recording = _cameraService.IsRecording,
+            path = _cameraService.RecordingPath,
+            uptime = _cameraService.Uptime.TotalSeconds,
+            frames = _cameraService.FrameCount
+        });
+    }
 }

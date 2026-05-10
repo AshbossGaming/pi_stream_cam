@@ -10,7 +10,12 @@
         <IsPackable>true</IsPackable>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <PackageId>pi-stream-cam</PackageId>
-        
+        <Version>1.0.0</Version>
+        <FileVersion>1.0.0.0</FileVersion>
+        <InformationalVersion>1.0.0</InformationalVersion>
+        <Company>Pi Stream Cam</Company>
+        <Product>Pi Stream Cam</Product>
+        <Description>PTZ Camera Surveillance System for Raspberry Pi</Description>
     </PropertyGroup>
 
     <ItemGroup>
@@ -18,5 +23,11 @@
         <PackageReference Include="Microsoft.AspNetCore.Authentication.Cookies" Version="2.2.0"/>
     </ItemGroup>
 
-</Project>
+    <ItemGroup>
+        <None Include="..\VERSION" Pack="true" PackagePath="\">
+            <Link>VERSION</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
 
+</Project>

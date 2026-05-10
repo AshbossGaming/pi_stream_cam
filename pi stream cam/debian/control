@@ -1,0 +1,26 @@
+Source: pi-stream-cam
+Section: net
+Priority: optional
+Maintainer: Pi Stream Cam <ash12@users.noreply.github.com>
+Build-Depends:
+  debhelper-compat (= 13),
+  dotnet-sdk-8.0
+Standards-Version: 4.6.2
+Homepage: https://github.com/ash12/pi-stream-cam
+Rules-Requires-Root: no
+
+Package: pi-stream-cam
+Architecture: arm64
+Depends:
+  ${shlibs:Depends},
+  ${misc:Depends},
+  gstreamer1.0-tools,
+  gstreamer1.0-libcamera,
+  gstreamer1.0-plugins-good,
+  gstreamer1.0-plugins-bad,
+  libcamera-v4l2,
+  libi2c-0
+Description: PTZ Camera Surveillance System for Raspberry Pi
+  Web-based PTZ camera control and MJPEG streaming for
+  Arducam 16MP IMX519 camera with MG90S servo control
+  via PCA9685 PWM driver.

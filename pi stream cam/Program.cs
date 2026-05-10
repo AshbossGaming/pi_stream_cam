@@ -71,7 +71,6 @@ app.UseAuthorization();
 
 app.MapGet("/login", async context =>
 {
-    // Check for mobile app key - auto authenticate
     if (context.Request.Headers.TryGetValue("X-App-Key", out var appKey) && appKey == "pi-stream-cam-mobile-v1")
     {
         var claims = new System.Security.Claims.Claim[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "mobile-app") };
@@ -144,6 +143,48 @@ app.MapGet("/logout", async context =>
     context.Response.Redirect("/login");
 });
 
+app.MapPost("/api/option", async context =>
+{
+    var camera = cameraService;
+    var servo = servoService;
+
+    using var reader = new StreamReader(context.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+
+    int set = 0, failed = 0;
+
+    foreach (var prop in doc.RootElement.EnumerateObject())
+    {
+        try
+        {
+            switch (prop.Name)
+            {
+                case "zoom": camera.SetZoom(prop.Value.GetInt32()); set++; break;
+                case "focus": camera.SetFocus(prop.Value.GetInt32()); set++; break;
+                case "autofocus": camera.SetAfMode(prop.Value.GetString()!); set++; break;
+                case "afmode": camera.SetAfMode(prop.Value.GetString()!); set++; break;
+                case "focusrange": camera.SetFocusRange(prop.Value.GetString()!); set++; break;
+                case "exposurecomp": camera.SetExposureCompensation(prop.Value.GetInt32()); set++; break;
+                case "whitebalance": camera.SetWhiteBalance(prop.Value.GetInt32()); set++; break;
+                case "sharpness": camera.SetSharpness(prop.Value.GetDouble()); set++; break;
+                case "brightness": camera.SetBrightness(prop.Value.GetInt32()); set++; break;
+                case "contrast": camera.SetContrast(prop.Value.GetInt32()); set++; break;
+                case "saturation": camera.SetSaturation(prop.Value.GetInt32()); set++; break;
+                case "quality": camera.SetQuality(prop.Value.GetInt32()); set++; break;
+                case "videoflipped": camera.SetVideoFlip(prop.Value.GetBoolean()); set++; break;
+                case "pan": await servo.SetPanAsync(prop.Value.GetInt32()); set++; break;
+                case "tilt": await servo.SetTiltAsync(prop.Value.GetInt32()); set++; break;
+                default: failed++; break;
+            }
+        }
+        catch { failed++; }
+    }
+
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsJsonAsync(new { set, failed });
+}).AllowAnonymous();
+
 app.UseStaticFiles();
 app.UseCors();
 app.MapControllers();
@@ -162,16 +203,94 @@ app.MapGet("/dock", async context =>
 
 cameraService.StartCapture();
 
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    Console.WriteLine("Shutting down...");
+    servoService.Dispose();
+    cameraService.StopCapture();
+    cameraService.Dispose();
+});
+
+app.MapGet("/api/status", () =>
+{
+    var camera = cameraService;
+    var servo = servoService;
+
+    return Results.Ok(new
+    {
+        version = VersionInfo.Version,
+        revision = VersionInfo.Revision,
+        buildDate = VersionInfo.BuildDate,
+
+        camera = new
+        {
+            capturing = camera.IsCapturing,
+            hasCamera = camera.IsCapturing,
+            frameCount = camera.FrameCount,
+            droppedFrames = camera.DroppedFrames,
+            fps = camera.CurrentFps,
+            uptimeSeconds = camera.Uptime.TotalSeconds,
+            zoom = camera.Zoom,
+            focus = camera.Focus,
+            autofocus = camera.AutofocusEnabled,
+            afMode = camera.AfMode,
+            focusRange = camera.FocusRange,
+            exposureCompensation = camera.ExposureCompensation,
+            whiteBalance = camera.WhiteBalance,
+            sharpness = camera.Sharpness,
+            brightness = camera.Brightness,
+            contrast = camera.Contrast,
+            saturation = camera.Saturation,
+            quality = camera.Quality,
+            videoFlipped = camera.VideoFlipped,
+            recording = camera.IsRecording,
+            recordingPath = camera.RecordingPath
+        },
+
+        ptz = new
+        {
+            pan = servo.PanAngle,
+            tilt = servo.TiltAngle,
+            flipped = servo.IsFlipped,
+            panInverted = servo.IsPanInverted,
+            presets = servo.Presets
+        },
+
+        endpoints = new
+        {
+            mjpeg = new { url = $"http://picam1:{streamPort}/api/stream/mjpeg", type = "multipart/x-mixed-replace" },
+            snapshot = new { url = $"http://picam1:{controlPort}/api/stream/snapshot", type = "image/jpeg" },
+            snapshotHighRes = new { url = $"http://picam1:{controlPort}/api/stream/snapshot/highres", type = "image/jpeg" },
+            status = new { url = $"http://picam1:{controlPort}/api/status", type = "application/json" },
+            ptzStatus = new { url = $"http://picam1:{controlPort}/api/ptz/status", type = "application/json" },
+            recordStart = new { url = $"http://picam1:{controlPort}/api/stream/record/start", method = "POST" },
+            recordStop = new { url = $"http://picam1:{controlPort}/api/stream/record/stop", method = "POST" }
+        },
+
+        system = new
+        {
+            controlPort,
+            streamPort,
+            platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            processId = Environment.ProcessId,
+            startTime = DateTime.UtcNow.ToString("o")
+        }
+    });
+}).AllowAnonymous();
+
 app.MapGet("/", () => Results.Ok(new
 {
     control = $"http://picam1:{controlPort}",
     stream = $"http://picam1:{streamPort}/api/stream/mjpeg",
+    status = $"/api/status",
     ptzStatus = "/api/ptz/status",
     ptzMove = "POST /api/ptz/move",
     ptzCenter = "POST /api/ptz/center",
     camera = "Arducam 16MP IMX519",
-    servos = "MG90S x2 via PCA9685"
+    servos = "MG90S x2 via PCA9685",
+    recording = "POST /api/stream/record/start",
+    snapshot = "/api/stream/snapshot",
+    version = VersionInfo.Version
 })).AllowAnonymous();
 
 app.Run();
-

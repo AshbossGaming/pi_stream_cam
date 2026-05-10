@@ -1,0 +1,9 @@
+pi-stream-cam (1.0.0-1) stable; urgency=medium
+
+  * Initial Debian packaging
+  * MJPEG streaming via GStreamer + libcamera
+  * PTZ control via PCA9685 + MG90S servos
+  * H264 video recording
+  * Rich REST API with status, snapshot, and recording endpoints
+
+ -- Pi Stream Cam <ash12@users.noreply.github.com>  Sun, 10 May 2026 00:00:00 +0000

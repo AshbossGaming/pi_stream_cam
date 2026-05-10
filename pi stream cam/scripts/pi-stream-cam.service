@@ -1,21 +1,31 @@
 [Unit]
-Description=Pi Stream Cam Service
+Description=Pi Stream Cam - PTZ Camera Surveillance System
+Documentation=https://github.com/ash12/pi-stream-cam
 After=network.target
+Wants=network-online.target
+ConditionPathExists=/dev/i2c-1
 
 [Service]
 Type=simple
-User=picam
+DynamicUser=yes
+SupplementaryGroups=video i2c gpio
 WorkingDirectory=/opt/pi-stream-cam/current
 ExecStart=/opt/pi-stream-cam/current/pi-stream-cam
 Restart=always
 RestartSec=10
-StandardOutput=append:/var/log/pi-stream-cam/output.log
-StandardError=append:/var/log/pi-stream-cam/error.log
+Nice=10
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+CPUWeight=20
+AllowedCPUs=1-2
+MemoryMax=256M
+MemoryHigh=192M
+StandardOutput=journal
+StandardError=journal
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 Environment=CONTROL_PORT=5000
 Environment=STREAM_PORT=5001
-Environment=GST_DEBUG=0
 
 [Install]
 WantedBy=multi-user.target

@@ -103,6 +103,37 @@
             color: #888;
             margin-top: 2px;
         }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin: 4px 0;
+            padding: 4px 6px;
+            background: #222;
+            border-radius: 4px;
+            font-size: 10px;
+        }
+        .badge {
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #333;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        .badge.rec-off { color: #888; }
+        .badge.rec-on { color: #f44; background: #422; animation: pulse 1.5s infinite; }
+        .btn.btn-sm {
+            padding: 3px 6px;
+            font-size: 10px;
+            border: 1px solid #555;
+            background: #333;
+            color: #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .btn.btn-sm:hover { background: #444; }
+        .btn.btn-sm.recording { color: #f44; border-color: #f44; background: #422; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
@@ -125,6 +156,13 @@
         <input type="text" id="streamUrl" value="api/stream/mjpeg" placeholder="api/stream/mjpeg">
     </div>
     
+    <div class="toolbar">
+        <span id="fpsDisplay" class="badge">- fps</span>
+        <span id="recordBadge" class="badge rec-off">&#9679; Idle</span>
+        <button class="btn btn-sm" onclick="takeSnapshot()">&#128247;</button>
+        <button class="btn btn-sm" id="recordBtn" onclick="toggleRecording()">&#9679; Rec</button>
+    </div>
+
     <img id="streamFrame" src="api/stream/mjpeg">
     
     <div class="dpad">
@@ -616,6 +654,75 @@
             }
         }
         
+        let isRecording = false;
+        let currentFps = 0;
+
+        async function takeSnapshot() {
+            try {
+                const ts = Date.now();
+                const res = await fetch('/api/stream/snapshot?_cb=' + ts, { credentials: 'same-origin' });
+                if (!res.ok) throw new Error(res.statusText);
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'snapshot_' + new Date().toISOString().slice(0,19).replace(/[:-]/g, '') + '.jpg';
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                updateStatus('Snapshot: ' + e.message, 'error');
+            }
+        }
+
+        async function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+            try {
+                if (isRecording) {
+                    const result = await apiCall('/api/stream/record/stop', { method: 'POST' });
+                    if (result) {
+                        isRecording = false;
+                        btn.classList.remove('recording');
+                        btn.textContent = '\u25CF Rec';
+                        document.getElementById('recordBadge').className = 'badge rec-off';
+                        document.getElementById('recordBadge').textContent = '\u25CF Idle';
+                    }
+                } else {
+                    const result = await apiCall('/api/stream/record/start', { method: 'POST' });
+                    if (result) {
+                        isRecording = true;
+                        btn.classList.add('recording');
+                        btn.textContent = '\u25A0 Stop';
+                        document.getElementById('recordBadge').className = 'badge rec-on';
+                        document.getElementById('recordBadge').textContent = '\u25CF REC';
+                    }
+                }
+            } catch (e) {
+                updateStatus('Rec: ' + e.message, 'error');
+            }
+        }
+
+        async function fetchSystemStatus() {
+            const result = await apiCall('/api/status');
+            if (result && result.camera) {
+                currentFps = result.camera.fps || 0;
+                document.getElementById('fpsDisplay').textContent = currentFps + ' fps';
+                isRecording = result.camera.recording || false;
+                const badge = document.getElementById('recordBadge');
+                const btn = document.getElementById('recordBtn');
+                if (isRecording) {
+                    badge.className = 'badge rec-on';
+                    badge.textContent = '\u25CF REC';
+                    btn.classList.add('recording');
+                    btn.textContent = '\u25A0 Stop';
+                } else {
+                    badge.className = 'badge rec-off';
+                    badge.textContent = '\u25CF Idle';
+                    btn.classList.remove('recording');
+                    btn.textContent = '\u25CF Rec';
+                }
+            }
+        }
+
         loadCamIp();
         updateCamUrl();
         
@@ -623,6 +730,7 @@
         loadPresets();
         fetchStatus();
         setInterval(fetchStatus, 2000);
+        setInterval(fetchSystemStatus, 5000);
     </script>
 </body>
 </html>
