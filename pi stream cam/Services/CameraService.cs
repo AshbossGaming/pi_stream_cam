@@ -373,7 +373,7 @@ public class CameraService : IDisposable
 
     private string BuildGstPipeline(int width, int height, int framerate)
     {
-        var srcProps = new List<string> { $"camera-name={_cameraId}" };
+        var srcProps = new List<string> { "camera-index=0" };
 
         if (Math.Abs(_sharpness - 1.0) > 0.01)
             srcProps.Add($"sharpness={_sharpness:F1}");
