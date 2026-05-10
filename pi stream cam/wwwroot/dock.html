@@ -100,11 +100,49 @@
             transform-origin: center center;
         }
         .preset-btn { position: relative; }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 8px;
+            padding: 6px 8px;
+            background: #222;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        .badge {
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #333;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        .badge.rec-off { color: #888; }
+        .badge.rec-on { color: #f44; background: #422; animation: pulse 1.5s infinite; }
+        .btn.btn-sm {
+            padding: 4px 8px;
+            font-size: 10px;
+            border: 1px solid #555;
+            background: #333;
+            color: #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .btn.btn-sm:hover { background: #444; }
+        .btn.btn-sm.recording { color: #f44; border-color: #f44; background: #422; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
     <h2>PTZ Camera Control</h2>
     
+    <div class="toolbar">
+        <span id="fpsDisplay" class="badge">- fps</span>
+        <span id="recordBadge" class="badge rec-off">&#9679; Idle</span>
+        <button class="btn btn-sm" onclick="takeSnapshot()" title="Download Snapshot">&#128247; Snap</button>
+        <button class="btn btn-sm" id="recordBtn" onclick="toggleRecording()" title="Start/Stop Recording">&#9679; Record</button>
+    </div>
+
     <div class="stream-container">
         <img id="streamFrame" src="">
     </div>
@@ -585,12 +623,88 @@
             }
         }
         
+        let isRecording = false;
+        let currentFps = 0;
+
+        async function takeSnapshot() {
+            updateStatus('Capturing snapshot...');
+            try {
+                const ts = Date.now();
+                const res = await fetch('/api/stream/snapshot?_cb=' + ts, { credentials: 'same-origin' });
+                if (!res.ok) throw new Error(res.statusText);
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'snapshot_' + new Date().toISOString().slice(0,19).replace(/[:-]/g, '') + '.jpg';
+                a.click();
+                URL.revokeObjectURL(url);
+                updateStatus('Snapshot saved', 'success');
+            } catch (e) {
+                updateStatus('Snapshot failed: ' + e.message, 'error');
+            }
+        }
+
+        async function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+            try {
+                if (isRecording) {
+                    const result = await apiCall('/api/stream/record/stop', { method: 'POST' });
+                    if (result) {
+                        isRecording = false;
+                        btn.classList.remove('recording');
+                        btn.textContent = '\u25CF Record';
+                        document.getElementById('recordBadge').className = 'badge rec-off';
+                        document.getElementById('recordBadge').textContent = '\u25CF Idle';
+                        updateStatus('Recording stopped', 'success');
+                    }
+                } else {
+                    const result = await apiCall('/api/stream/record/start', { method: 'POST' });
+                    if (result) {
+                        isRecording = true;
+                        btn.classList.add('recording');
+                        btn.textContent = '\u25A0 Stop';
+                        document.getElementById('recordBadge').className = 'badge rec-on';
+                        document.getElementById('recordBadge').textContent = '\u25CF REC';
+                        updateStatus('Recording started', 'success');
+                    }
+                }
+            } catch (e) {
+                updateStatus('Recording error: ' + e.message, 'error');
+            }
+        }
+
+        async function fetchSystemStatus() {
+            const result = await apiCall('/api/status');
+            if (result) {
+                if (result.camera) {
+                    currentFps = result.camera.fps || 0;
+                    document.getElementById('fpsDisplay').textContent = currentFps + ' fps';
+                    isRecording = result.camera.recording || false;
+                    const badge = document.getElementById('recordBadge');
+                    const btn = document.getElementById('recordBtn');
+                    if (isRecording) {
+                        badge.className = 'badge rec-on';
+                        badge.textContent = '\u25CF REC';
+                        btn.classList.add('recording');
+                        btn.textContent = '\u25A0 Stop';
+                    } else {
+                        badge.className = 'badge rec-off';
+                        badge.textContent = '\u25CF Idle';
+                        btn.classList.remove('recording');
+                        btn.textContent = '\u25CF Record';
+                    }
+                }
+            }
+        }
+
         document.getElementById('streamFrame').addEventListener('load', function() {
             applyZoom(currentZoom);
         });
 
         updateCamUrl();
         setInterval(fetchStatus, 2000);
+        setInterval(fetchSystemStatus, 5000);
     </script>
 </body>
 </html>

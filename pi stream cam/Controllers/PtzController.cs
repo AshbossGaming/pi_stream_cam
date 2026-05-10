@@ -138,6 +138,11 @@ public class PtzController : ControllerBase
         return Ok(new { saturation = _cameraService.Saturation });
     }
 
+    private void SyncFlip()
+    {
+        _cameraService.SetVideoFlip(_servoService.TiltAngle > 90);
+    }
+
     [HttpPost("pan/{angle}")]
     public async Task<IActionResult> SetPan(int angle)
     {
@@ -149,7 +154,8 @@ public class PtzController : ControllerBase
     public async Task<IActionResult> SetTilt(int angle)
     {
         await _servoService.SetTiltAsync(angle);
-        return Ok(new { tilt = _servoService.TiltAngle });
+        SyncFlip();
+        return Ok(new { tilt = _servoService.TiltAngle, videoflipped = _cameraService.VideoFlipped });
     }
 
     [HttpPost("move")]
@@ -162,27 +168,30 @@ public class PtzController : ControllerBase
         if (request.DeltaTilt != 0)
             await _servoService.MoveTiltAsync(request.DeltaTilt);
         
-        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle });
+        SyncFlip();
+        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle, videoflipped = _cameraService.VideoFlipped });
     }
 
     [HttpPost("center")]
     public async Task<IActionResult> Center()
     {
         await _servoService.CenterAsync();
-        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle });
+        SyncFlip();
+        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle, flipped = _servoService.IsFlipped, videoflipped = _cameraService.VideoFlipped });
     }
 
     [HttpPost("flip")]
     public async Task<IActionResult> Flip()
     {
         await _servoService.FlipAsync();
-        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle, flipped = _servoService.IsFlipped });
+        SyncFlip();
+        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle, flipped = _servoService.IsFlipped, videoflipped = _cameraService.VideoFlipped });
     }
 
     [HttpPost("videoflip")]
     public IActionResult SyncVideoFlip()
     {
-        _cameraService.SetVideoFlip(_servoService.TiltAngle > 90);
+        SyncFlip();
         return Ok(new { videoflipped = _cameraService.VideoFlipped });
     }
 }

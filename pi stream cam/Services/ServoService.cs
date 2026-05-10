@@ -209,7 +209,12 @@ public class ServoService : IDisposable
             delta = -delta;
         return SetPanAsync(_panAngle + delta);
     }
-    public Task MoveTiltAsync(int delta) => SetTiltAsync(_tiltAngle + delta);
+    public Task MoveTiltAsync(int delta)
+    {
+        if (_tiltAngle > 90)
+            delta = -delta;
+        return SetTiltAsync(_tiltAngle + delta);
+    }
     public async Task CenterAsync()
     {
         await SetTiltAsync(45);
