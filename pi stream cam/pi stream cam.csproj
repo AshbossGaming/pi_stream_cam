@@ -1,15 +1,16 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <RootNamespace>pi_stream_cam</RootNamespace>
+        <AssemblyName>pi-stream-cam</AssemblyName>
         <LangVersion>default</LangVersion>
         <TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>
         <IsPackable>true</IsPackable>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <PackageId>PiStreamCam</PackageId>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageId>pi-stream-cam</PackageId>
+        
     </PropertyGroup>
 
     <ItemGroup>
@@ -18,3 +19,4 @@
     </ItemGroup>
 
 </Project>
+

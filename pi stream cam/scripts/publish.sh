@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # Publish script - run on development machine
 # Publishes the app for Raspberry Pi (linux-arm64)
 
@@ -8,7 +8,7 @@ echo "Publishing for Raspberry Pi (linux-arm64)..."
 # .NET 8 runtime is supported on Pi OS
 SELF_CONTAINED=true
 
-dotnet publish "pi stream cam.csproj" -c Release -r linux-arm64 --self-contained $SELF_CONTAINED -o ./publish
+dotnet publish "pi stream cam.csproj" -c Release -r linux-arm64 -f net8.0 --self-contained $SELF_CONTAINED -o ./publish
 
 if [ "$SELF_CONTAINED" = false ]; then
     echo ""

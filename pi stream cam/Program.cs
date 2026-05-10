@@ -1,6 +1,16 @@
-using pi_stream_cam.Services;
+﻿using pi_stream_cam.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var controlPort = builder.Configuration.GetValue("CONTROL_PORT", 5000);
+var streamPort = builder.Configuration.GetValue("STREAM_PORT", 5001);
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(controlPort);
+    if (streamPort != controlPort)
+        options.ListenAnyIP(streamPort);
+});
 
 builder.Services.AddControllers();
 builder.Services.AddCors(options =>
@@ -30,11 +40,47 @@ builder.Services.AddSingleton(servoService);
 
 var app = builder.Build();
 
+app.Use(async (context, next) =>
+{
+    if (streamPort == controlPort)
+    {
+        await next();
+        return;
+    }
+
+    var requestPort = context.Request.Host.Port;
+    var isStreamRequest = context.Request.Path.StartsWithSegments("/api/stream");
+
+    if (requestPort == streamPort && !isStreamRequest)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    if (requestPort == controlPort && isStreamRequest)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await next();
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/login", async context =>
 {
+    // Check for mobile app key - auto authenticate
+    if (context.Request.Headers.TryGetValue("X-App-Key", out var appKey) && appKey == "pi-stream-cam-mobile-v1")
+    {
+        var claims = new System.Security.Claims.Claim[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "mobile-app") };
+        var identity = new System.Security.Claims.ClaimsIdentity(claims, "Cookies");
+        var principal = new System.Security.Claims.ClaimsPrincipal(identity);
+        await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignInAsync(context, "Cookies", principal);
+        context.Response.Redirect("/dock.html");
+        return;
+    }
     context.Response.ContentType = "text/html";
     await context.Response.WriteAsync(@"
 <!DOCTYPE html>
@@ -84,7 +130,7 @@ app.MapPost("/login", async context =>
         var identity = new System.Security.Claims.ClaimsIdentity(claims, "Cookies");
         var principal = new System.Security.Claims.ClaimsPrincipal(identity);
         await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignInAsync(context, "Cookies", principal);
-        context.Response.Redirect("/");
+        context.Response.Redirect("/dock");
     }
     else
     {
@@ -102,15 +148,15 @@ app.UseStaticFiles();
 app.UseCors();
 app.MapControllers();
 
-app.MapGet("/mobile", async context =>
+app.MapGet("/mobile", context =>
 {
-    context.Response.ContentType = "text/html";
-    await context.Response.SendFileAsync("wwwroot/mobile.html");
+    context.Response.Redirect("/dock");
+    return Task.CompletedTask;
 }).RequireAuthorization();
 
 app.MapGet("/dock", async context =>
 {
-    context.Response.ContentType = "text/html";
+    context.Response.ContentType = "text/html; charset=utf-8";
     await context.Response.SendFileAsync("wwwroot/dock.html");
 }).RequireAuthorization();
 
@@ -118,8 +164,8 @@ cameraService.StartCapture();
 
 app.MapGet("/", () => Results.Ok(new
 {
-    stream = "/api/stream/mjpeg",
-    snapshot = "/api/stream/snapshot",
+    control = $"http://picam1:{controlPort}",
+    stream = $"http://picam1:{streamPort}/api/stream/mjpeg",
     ptzStatus = "/api/ptz/status",
     ptzMove = "POST /api/ptz/move",
     ptzCenter = "POST /api/ptz/center",
@@ -128,3 +174,4 @@ app.MapGet("/", () => Results.Ok(new
 })).AllowAnonymous();
 
 app.Run();
+

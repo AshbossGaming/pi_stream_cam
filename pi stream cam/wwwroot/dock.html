@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -84,16 +84,20 @@
         }
         .status.error { color: #f88; }
         .status.success { color: #8f8; }
-        img {
+        .stream-container {
             width: 100%;
-            height: auto;
             max-height: 400px;
+            overflow: hidden;
             background: #000;
             border: 1px solid #333;
             border-radius: 4px;
             margin-bottom: 12px;
+        }
+        .stream-container img {
+            width: 100%;
+            height: auto;
             display: block;
-            object-fit: contain;
+            transform-origin: center center;
         }
         .preset-btn { position: relative; }
     </style>
@@ -101,24 +105,9 @@
 <body>
     <h2>PTZ Camera Control</h2>
     
-    <div class="stream-url">
-        <label>Camera IP</label>
-        <div style="display: flex; gap: 4px; margin-bottom: 4px;">
-            <input type="text" id="camIp" value="192.168.100.203" placeholder="192.168.100.203" style="flex: 1;">
-            <button class="btn" onclick="saveCamIp()" style="padding: 6px 12px;">Save</button>
-        </div>
-        <div style="display: flex; gap: 4px;">
-            <button class="btn" onclick="setIp('192.168.100.203')" style="flex: 1; font-size: 11px; padding: 4px;">Cam 1 (.203)</button>
-            <button class="btn" onclick="setIp('192.168.100.204')" style="flex: 1; font-size: 11px; padding: 4px;">Cam 2 (.204)</button>
-        </div>
+    <div class="stream-container">
+        <img id="streamFrame" src="">
     </div>
-    
-    <div class="stream-url">
-        <label>Stream URL</label>
-        <input type="text" id="streamUrl" value="api/stream/mjpeg" placeholder="api/stream/mjpeg">
-    </div>
-    
-    <img id="streamFrame" src="api/stream/mjpeg">
     
     <div class="dpad">
         <div></div>
@@ -133,18 +122,18 @@
     </div>
     
     <div class="slider-group">
-        <label>Pan <span id="panValue">90°</span></label>
+        <label>Pan <span id="panValue">90&deg;</span></label>
         <input type="range" id="panSlider" min="0" max="180" value="90" oninput="updateSlider('pan')">
     </div>
     
     <div class="slider-group">
-        <label>Tilt <span id="tiltValue">90°</span></label>
-        <input type="range" id="tiltSlider" min="0" max="180" value="90" oninput="updateSlider('tilt')">
+        <label>Tilt <span id="tiltValue">45&deg;</span></label>
+        <input type="range" id="tiltSlider" min="0" max="180" value="45" oninput="updateSlider('tilt')">
     </div>
     
     <div class="slider-group">
         <label>Zoom <span id="zoomValue">1x</span></label>
-        <input type="range" id="zoomSlider" min="1" max="8" value="1" oninput="updateZoom()">
+        <input type="range" id="zoomSlider" min="1" max="8" value="1" oninput="updateZoom()" onchange="commitZoom()">
     </div>
     
     <div class="slider-group">
@@ -203,7 +192,8 @@
     <div class="status" id="status">Ready</div>
     
     <script>
-        let currentPan = 90, currentTilt = 90, currentZoom = 1, currentFocus = 50;
+        let currentPan = 90, currentTilt = 45, currentZoom = 1, currentFocus = 50;
+        let videoFlipped = false;
         let autoFocus = true;
         let afMode = 'continuous';
         let focusRange = 'normal';
@@ -213,48 +203,14 @@
         let brightness = 0;
         let contrast = 1.0;
         let saturation = 1.0;
+        let presets = [];
         
         const wbModes = ['Auto', 'Incandescent', 'Tungsten', 'Fluorescent', 'Indoor', 'Daylight', 'Cloudy', 'Cool White', 'Flash'];
-        
-        function getApiBase() {
-            const ip = document.getElementById('camIp').value.trim();
-            if (!ip) return ''; // Relative to current host
-            if (ip.startsWith('http')) return ip;
-            const parts = ip.split(':');
-            const host = parts[0];
-            const port = parts[1] || '5000';
-            return 'http://' + host + ':' + port;
-        }
-        
-        function saveCamIp() {
-            const ip = document.getElementById('camIp').value.trim();
-            localStorage.setItem('camIp', ip);
-            updateCamUrl();
-            updateStatus('IP Saved: ' + (ip || 'Local'), 'success');
-        }
+        const streamPort = 5001;
 
-        function setIp(ip) {
-            document.getElementById('camIp').value = ip;
-            saveCamIp();
-        }
-
-        function loadCamIp() {
-            const savedIp = localStorage.getItem('camIp');
-            if (savedIp) {
-                document.getElementById('camIp').value = savedIp;
-            }
-        }
-        
         function updateCamUrl() {
-            let base = getApiBase();
-            let streamPath = document.getElementById('streamUrl').value;
-            if (base) {
-                if (!base.endsWith('/')) base += '/';
-                if (streamPath.startsWith('/')) streamPath = streamPath.substring(1);
-                document.getElementById('streamFrame').src = base + streamPath;
-            } else {
-                document.getElementById('streamFrame').src = streamPath;
-            }
+            const streamPath = `${location.protocol}//${location.hostname}:${streamPort}/api/stream/mjpeg`;
+            document.getElementById('streamFrame').src = streamPath;
             fetchStatus();
         }
         
@@ -266,10 +222,11 @@
         
         async function apiCall(endpoint, options = {}) {
             try {
-                const res = await fetch(getApiBase() + endpoint, { 
+                const res = await fetch(endpoint, { 
                     method: options.method || 'GET', 
                     body: options.body,
-                    credentials: 'include'
+                    credentials: 'same-origin',
+                    headers: options.body ? { 'Content-Type': 'application/json' } : {}
                 });
                 if (!res.ok) throw new Error(res.statusText);
                 return await res.json();
@@ -289,7 +246,8 @@
                 currentPan = result.pan;
                 currentTilt = result.tilt;
                 updateSliders();
-                updateStatus('Pan: ' + result.pan + '°, Tilt: ' + result.tilt + '°', 'success');
+                await syncVideoFlip();
+                updateStatus('Pan: ' + result.pan + '\u00B0, Tilt: ' + result.tilt + '\u00B0', 'success');
             }
         }
         
@@ -300,10 +258,11 @@
                 currentPan = result.pan;
                 currentTilt = result.tilt;
                 updateSliders();
+                await syncVideoFlip();
                 updateStatus('Centered', 'success');
             }
         }
-        
+
         async function setAngle(axis, angle) {
             updateStatus('Setting ' + axis + '...');
             const result = await apiCall('/api/ptz/' + axis + '/' + angle, { method: 'POST' });
@@ -311,7 +270,16 @@
                 if (result.pan !== undefined) currentPan = result.pan;
                 if (result.tilt !== undefined) currentTilt = result.tilt;
                 updateSliders();
+                await syncVideoFlip();
                 updateStatus('Done', 'success');
+            }
+        }
+        
+        async function syncVideoFlip() {
+            const shouldFlip = currentTilt > 90;
+            if (shouldFlip !== videoFlipped) {
+                const result = await apiCall('/api/ptz/videoflip', { method: 'POST' });
+                if (result) videoFlipped = result.videoflipped;
             }
         }
         
@@ -319,19 +287,19 @@
             const slider = document.getElementById(axis + 'Slider');
             const value = parseInt(slider.value);
             if (axis === 'pan') {
-                document.getElementById('panValue').textContent = value + '°';
+                document.getElementById('panValue').textContent = value + '\u00B0';
                 if (Math.abs(value - currentPan) > 2) setAngle('pan', value);
             } else {
-                document.getElementById('tiltValue').textContent = value + '°';
+                document.getElementById('tiltValue').textContent = value + '\u00B0';
                 if (Math.abs(value - currentTilt) > 2) setAngle('tilt', value);
             }
         }
         
         function updateSliders() {
             document.getElementById('panSlider').value = currentPan;
-            document.getElementById('panValue').textContent = currentPan + '°';
+            document.getElementById('panValue').textContent = currentPan + '\u00B0';
             document.getElementById('tiltSlider').value = currentTilt;
-            document.getElementById('tiltValue').textContent = currentTilt + '°';
+            document.getElementById('tiltValue').textContent = currentTilt + '\u00B0';
         }
         
         // Preset actions
@@ -357,7 +325,7 @@
             });
             if (result) {
                 presets = result.presets;
-                updateStatus('Preset ' + (index + 1) + ' saved: Pan ' + currentPan + '°, Tilt ' + currentTilt + '°', 'success');
+                updateStatus('Preset ' + (index + 1) + ' saved: Pan ' + currentPan + '\u00B0, Tilt ' + currentTilt + '\u00B0', 'success');
             }
         }
         
@@ -378,16 +346,25 @@
             // Presets are loaded via fetchStatus() from the server
         }
         
-        async function updateZoom() {
+        function applyZoom(zoom) {
+            const img = document.getElementById('streamFrame');
+            img.style.transform = zoom > 1 ? 'scale(' + zoom + ')' : 'none';
+        }
+
+        function updateZoom() {
             const slider = document.getElementById('zoomSlider');
             const value = parseInt(slider.value);
             document.getElementById('zoomValue').textContent = value + 'x';
-            if (Math.abs(value - currentZoom) > 0) {
-                const result = await apiCall('/api/ptz/zoom/' + value, { method: 'POST' });
-                if (result) {
-                    currentZoom = result.zoom;
-                    updateStatus('Zoom: ' + result.zoom + 'x', 'success');
-                }
+            currentZoom = value;
+            applyZoom(value);
+        }
+
+        async function commitZoom() {
+            const result = await apiCall('/api/ptz/zoom/' + currentZoom, { method: 'POST' });
+            if (result) {
+                currentZoom = result.zoom;
+                applyZoom(currentZoom);
+                updateStatus('Zoom: ' + result.zoom + 'x', 'success');
             }
         }
         
@@ -585,6 +562,7 @@
                 updateSliders();
                 document.getElementById('zoomSlider').value = currentZoom;
                 document.getElementById('zoomValue').textContent = currentZoom + 'x';
+                applyZoom(currentZoom);
                 document.getElementById('focusSlider').value = currentFocus;
                 document.getElementById('focusValue').textContent = currentFocus;
                 document.getElementById('exposureSlider').value = exposureComp;
@@ -602,14 +580,18 @@
                 syncAfState();
                 document.getElementById('rangeNormal').classList.toggle('active', focusRange === 'normal');
                 document.getElementById('rangeMacro').classList.toggle('active', focusRange === 'macro');
+                if (result.videoflipped !== undefined) videoFlipped = result.videoflipped;
+                await syncVideoFlip();
             }
         }
         
-        loadCamIp();
+        document.getElementById('streamFrame').addEventListener('load', function() {
+            applyZoom(currentZoom);
+        });
+
         updateCamUrl();
-        
-        fetchStatus();
         setInterval(fetchStatus, 2000);
     </script>
 </body>
 </html>
+

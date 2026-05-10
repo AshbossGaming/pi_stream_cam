@@ -1,9 +1,10 @@
-using System.Device.I2c;
+﻿using System.Device.I2c;
 using Iot.Device.Pwm;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace pi_stream_cam.Services;
+using pi_stream_cam.Models;
 
 public class ServoService : IDisposable
 {
@@ -15,8 +16,9 @@ public class ServoService : IDisposable
     private object _lock = new();
     private readonly string _stateFile;
     private Pca9685? _pca9685;
+    private bool _hardwareInitAttempted;
 
-    private List<PtzPreset> _presets = new();
+    private List<PtzPreset> _presets = new() { null!, null!, null!, null! };
 
     public int PanAngle => _panAngle;
     public int TiltAngle => _tiltAngle;
@@ -29,35 +31,45 @@ public class ServoService : IDisposable
         _panChannel = panChannel;
         _tiltChannel = tiltChannel;
         _panAngle = 90;
-        _tiltAngle = 90;
+        _tiltAngle = 45;
         _stateFile = "/var/lib/pi-stream-cam/ptz-state.json";
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && File.Exists("/dev/i2c-1"))
-        {
-            try
-            {
-                var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(1, 0x40));
-                _pca9685 = new Pca9685(i2cDevice);
-                // Set PWM frequency to 50Hz for servos
-                _pca9685.PwmFrequency = 50;
-                _pca9685.SetDutyCycle(_panChannel, 0);
-                _pca9685.SetDutyCycle(_tiltChannel, 0);
-                _isHardwareAvailable = true;
-                Console.WriteLine("PCA9685 initialized on I2C address 0x40 (50Hz)");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"PCA9685 init failed: {ex.Message}");
-                _isHardwareAvailable = false;
-            }
-        }
-        else
+        LoadState();
+    }
+
+    private bool EnsureHardwareInitialized()
+    {
+        if (_hardwareInitAttempted)
+            return _isHardwareAvailable && _pca9685 != null;
+
+        _hardwareInitAttempted = true;
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || !File.Exists("/dev/i2c-1"))
         {
             _isHardwareAvailable = false;
             Console.WriteLine("PCA9685 not available (not on Linux or /dev/i2c-1 missing)");
+            return false;
         }
 
-        LoadState();
+        try
+        {
+            var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(1, 0x40));
+            _pca9685 = new Pca9685(i2cDevice);
+            _pca9685.PwmFrequency = 50;
+            _pca9685.SetDutyCycle(_panChannel, 0);
+            _pca9685.SetDutyCycle(_tiltChannel, 0);
+            _isHardwareAvailable = true;
+            Console.WriteLine("PCA9685 initialized on I2C address 0x40 (50Hz)");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"PCA9685 init failed: {ex.Message}");
+            _isHardwareAvailable = false;
+            try { _pca9685?.Dispose(); } catch { }
+            _pca9685 = null;
+            return false;
+        }
     }
 
     private void LoadState()
@@ -75,7 +87,7 @@ public class ServoService : IDisposable
                     _presets = state.Presets ?? new List<PtzPreset>();
                     // Ensure we have exactly 4 preset slots to match the UI
                     while (_presets.Count < 4) _presets.Add(null!);
-                    Console.WriteLine($"Restored position: Pan={_panAngle}°, Tilt={_tiltAngle}°, Presets={_presets.Count(p => p != null)}");
+                    Console.WriteLine($"Restored position: Pan={_panAngle}Â°, Tilt={_tiltAngle}Â°, Presets={_presets.Count(p => p != null)}");
                 }
             }
         }
@@ -95,11 +107,39 @@ public class ServoService : IDisposable
             
             var state = new PtzState { Pan = _panAngle, Tilt = _tiltAngle, Presets = _presets };
             var json = JsonSerializer.Serialize(state);
-            File.WriteAllText(_stateFile, json);
+            WriteAllTextAtomic(_stateFile, json);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Save state error: {ex.Message}");
+        }
+    }
+
+    private static void WriteAllTextAtomic(string path, string contents)
+    {
+        var dir = Path.GetDirectoryName(path)!;
+        var tempPath = Path.Combine(dir, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.Write(contents);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
+            }
+            catch { }
         }
     }
 
@@ -151,6 +191,18 @@ public class ServoService : IDisposable
         return Task.CompletedTask;
     }
 
+    public Task FlipAsync()
+    {
+        lock (_lock)
+        {
+            var newTilt = _tiltAngle > 90 ? 90 : 180;
+            _tiltAngle = newTilt;
+            SetServoAngle(_tiltChannel, newTilt);
+            SaveState();
+        }
+        return Task.CompletedTask;
+    }
+
     public Task MovePanAsync(int delta)
     {
         if (_tiltAngle > 90)
@@ -158,23 +210,29 @@ public class ServoService : IDisposable
         return SetPanAsync(_panAngle + delta);
     }
     public Task MoveTiltAsync(int delta) => SetTiltAsync(_tiltAngle + delta);
-    public Task CenterAsync() => SetTiltAsync(90).ContinueWith(_ => SetPanAsync(90));
+    public async Task CenterAsync()
+    {
+        await SetTiltAsync(45);
+        await SetPanAsync(90);
+    }
 
     private void SetServoAngle(int channel, int angle)
     {
-        if (!_isHardwareAvailable || _pca9685 == null) 
+        if (!EnsureHardwareInitialized() || _pca9685 == null)
         {
-            Console.WriteLine($"Servo CH{channel}: {angle}° (simulation)");
+            Console.WriteLine($"Servo CH{channel}: {angle}Â° (simulation)");
             return;
         }
 
+        var pca9685 = _pca9685!;
+
         try
         {
-            // Convert angle to duty cycle for MG90S servo (500-2400 μs pulse at 50Hz)
-            // 50Hz = 20ms period, so 500μs = 0.025 duty, 2400μs = 0.12 duty
+            // Convert angle to duty cycle for MG90S servo (500-2400 Î¼s pulse at 50Hz)
+            // 50Hz = 20ms period, so 500Î¼s = 0.025 duty, 2400Î¼s = 0.12 duty
             double dutyCycle = 0.025 + (angle / 180.0) * 0.095;
-            _pca9685.SetDutyCycle(channel, dutyCycle);
-            Console.WriteLine($"Servo CH{channel}: {angle}° (duty: {dutyCycle:F3})");
+            pca9685.SetDutyCycle(channel, dutyCycle);
+            Console.WriteLine($"Servo CH{channel}: {angle}Â° (duty: {dutyCycle:F3})");
         }
         catch (Exception ex)
         {
@@ -190,7 +248,7 @@ public class ServoService : IDisposable
             if (_isHardwareAvailable && _pca9685 != null)
             {
                 SetServoAngle(_panChannel, 90);
-                SetServoAngle(_tiltChannel, 90);
+                SetServoAngle(_tiltChannel, 45);
                 Thread.Sleep(500);
             }
             _pca9685?.Dispose();
@@ -198,16 +256,3 @@ public class ServoService : IDisposable
         catch { }
     }
 }
-
-    public class PtzState
-    {
-        public int Pan { get; set; } = 90;
-        public int Tilt { get; set; } = 90;
-        public List<PtzPreset>? Presets { get; set; }
-    }
-
-    public class PtzPreset
-    {
-        public int Pan { get; set; }
-        public int Tilt { get; set; }
-    }

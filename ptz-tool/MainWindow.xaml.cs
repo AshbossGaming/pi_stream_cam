@@ -1,11 +1,12 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using PTZTool.Models;
 
 namespace PTZTool;
 
@@ -14,20 +15,13 @@ public partial class MainWindow : Window
     private readonly HttpClient _http = new();
     private string _baseUrl = "http://192.168.100.203:5000";
     private int _currentCam = 0;
-    private int _pan = 90, _tilt = 45, _zoom = 1, _focus = 50;
     private System.Timers.Timer? _statusTimer;
     private System.Timers.Timer? _streamTimer;
+    private PtzStatus? _currentStatus;
     
     private readonly (string ip, string name)[] _cameras = {
         ("192.168.100.203", "Cam 1"),
         ("192.168.100.204", "Cam 2")
-    };
-    
-    private readonly (int pan, int tilt, int zoom)[] _presets = {
-        (90, 45, 1),
-        (45, 30, 1),
-        (135, 30, 1),
-        (90, 60, 2)
     };
 
     public MainWindow()
@@ -73,61 +67,51 @@ public partial class MainWindow : Window
     {
         try
         {
-            var json = await _http.GetStringAsync($"{_baseUrl}/api/ptz/status");
-            if (json.Contains("pan"))
+            var status = await _http.GetFromJsonAsync<PtzStatus>($"{_baseUrl}/api/ptz/status");
+            if (status != null)
             {
-                var start = json.IndexOf("pan") + 5;
-                var end = json.IndexOf(",", start);
-                if (int.TryParse(json[start..end], out int p)) _pan = p;
-                
-start = json.IndexOf("tilt") + 6;
-                end = json.IndexOf("}", start);
-                if (int.TryParse(json[start..end], out int t)) _tilt = t;
-                
-                int zPos = json.IndexOf("zoom");
-                if (zPos > 0) {
-                    start = zPos + 6;
-                    end = json.IndexOf(",", start);
-                    if (end < 0) end = json.IndexOf("}", start);
-                    if (int.TryParse(json[start..end], out int z)) _zoom = z;
-                }
-                
-                int fPos = json.IndexOf("focus");
-                if (fPos > 0) {
-                    start = fPos + 6;
-                    end = json.IndexOf(",", start);
-                    if (end < 0) end = json.IndexOf("}", start);
-                    if (int.TryParse(json[start..end], out int f)) _focus = f;
-                }
+                _currentStatus = status;
                 
                 Dispatcher.Invoke(() =>
                 {
-                    PanSlider.Value = _pan;
-                    TiltSlider.Value = _tilt;
-                    ZoomSlider.Value = _zoom;
-                    FocusSlider.Value = _focus;
-                    PanValue.Text = $"{_pan}°";
-                    TiltValue.Text = $"{_tilt}°";
-                    ZoomValue.Text = $"{_zoom}x";
-                    FocusValue.Text = $"{_focus}";
+                    PanSlider.Value = status.pan;
+                    TiltSlider.Value = status.tilt;
+                    ZoomSlider.Value = status.zoom;
+                    FocusSlider.Value = status.focus;
+                    
+                    PanValue.Text = $"{status.pan}°";
+                    TiltValue.Text = $"{status.tilt}°";
+                    ZoomValue.Text = $"{status.zoom}x";
+                    FocusValue.Text = $"{status.focus}";
                 });
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Status fetch error: {ex.Message}");
+        }
     }
 
     private async Task SetPan(int angle)
     {
-        _pan = Math.Clamp(angle, 0, 180);
-        await _http.PostAsync($"{_baseUrl}/api/ptz/pan/{_pan}", null);
-        PanValue.Text = $"{_pan}°";
+        try
+        {
+            angle = Math.Clamp(angle, 0, 180);
+            await _http.PostAsync($"{_baseUrl}/api/ptz/pan/{angle}", null);
+            PanValue.Text = $"{angle}°";
+        }
+        catch { }
     }
 
     private async Task SetTilt(int angle)
     {
-        _tilt = Math.Clamp(angle, 0, 180);
-        await _http.PostAsync($"{_baseUrl}/api/ptz/tilt/{_tilt}", null);
-        TiltValue.Text = $"{_tilt}°";
+        try
+        {
+            angle = Math.Clamp(angle, 0, 180);
+            await _http.PostAsync($"{_baseUrl}/api/ptz/tilt/{angle}", null);
+            TiltValue.Text = $"{angle}°";
+        }
+        catch { }
     }
 
     private async Task UpdateStreamAsync()
@@ -135,37 +119,53 @@ start = json.IndexOf("tilt") + 6;
         try
         {
             var url = $"{_baseUrl}/api/stream/mjpeg";
-            // In a real app we'd use a better way to refresh the image, but for a simple tool:
-            // StreamPreview.Source = new BitmapImage(new Uri($"{url}?t={DateTime.Now.Ticks}"));
         }
         catch { }
     }
 
     private async Task SetZoom(int level)
     {
-        _zoom = Math.Clamp(level, 1, 8);
-        await _http.PostAsync($"{_baseUrl}/api/ptz/zoom/{_zoom}", null);
-        ZoomValue.Text = $"{_zoom}x";
+        try
+        {
+            level = Math.Clamp(level, 1, 8);
+            await _http.PostAsync($"{_baseUrl}/api/ptz/zoom/{level}", null);
+            ZoomValue.Text = $"{level}x";
+        }
+        catch { }
     }
 
     private async Task SetFocus(int value)
     {
-        _focus = Math.Clamp(value, 0, 100);
-        await _http.PostAsync($"{_baseUrl}/api/ptz/focus/{_focus}", null);
-        FocusValue.Text = $"{_focus}";
+        try
+        {
+            value = Math.Clamp(value, 0, 100);
+            await _http.PostAsync($"{_baseUrl}/api/ptz/focus/{value}", null);
+            FocusValue.Text = $"{value}";
+        }
+        catch { }
     }
 
     private async Task CenterAsync()
     {
-        await SetPan(90);
-        await SetTilt(45);
+        await _http.PostAsync($"{_baseUrl}/api/ptz/center", null);
+        await FetchStatusAsync();
     }
 
-    private void PanLeft_Click(object s, RoutedEventArgs e) => _ = SetPan(_pan - 5);
-    private void PanRight_Click(object s, RoutedEventArgs e) => _ = SetPan(_pan + 5);
-    private void TiltUp_Click(object s, RoutedEventArgs e) => _ = SetTilt(_tilt + 5);
-    private void TiltDown_Click(object s, RoutedEventArgs e) => _ = SetTilt(_tilt - 5);
+    private void PanLeft_Click(object s, RoutedEventArgs e) => _ = MoveRelative(-5, 0);
+    private void PanRight_Click(object s, RoutedEventArgs e) => _ = MoveRelative(5, 0);
+    private void TiltUp_Click(object s, RoutedEventArgs e) => _ = MoveRelative(0, 5);
+    private void TiltDown_Click(object s, RoutedEventArgs e) => _ = MoveRelative(0, -5);
     private void Center_Click(object s, RoutedEventArgs e) => _ = CenterAsync();
+    
+    private async Task MoveRelative(int deltaPan, int deltaTilt)
+    {
+        try
+        {
+            var request = new { deltaPan, deltaTilt };
+            await _http.PostAsJsonAsync($"{_baseUrl}/api/ptz/move", request);
+        }
+        catch { }
+    }
     
     private void Preset1_Click(object s, RoutedEventArgs e) => _ = RecallPreset(0);
     private void Preset2_Click(object s, RoutedEventArgs e) => _ = RecallPreset(1);
@@ -174,10 +174,12 @@ start = json.IndexOf("tilt") + 6;
     
     private async Task RecallPreset(int index)
     {
-        var p = _presets[index];
-        await SetPan(p.pan);
-        await SetTilt(p.tilt);
-        await SetZoom(p.zoom);
+        try
+        {
+            await _http.PostAsync($"{_baseUrl}/api/ptz/presets/{index}/recall", null);
+            await FetchStatusAsync();
+        }
+        catch { }
     }
 
     private void PanSlider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -199,10 +201,4 @@ start = json.IndexOf("tilt") + 6;
     {
         if (IsLoaded) { FocusValue.Text = $"{(int)e.NewValue}"; _ = SetFocus((int)e.NewValue); }
     }
-}
-
-public static class HttpClientExtensions
-{
-    public static Task<HttpResponseMessage> PostAsync(this HttpClient client, string requestUri, HttpContent? content)
-        => client.PostAsync(requestUri, content);
 }

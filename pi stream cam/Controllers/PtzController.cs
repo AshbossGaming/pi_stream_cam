@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using pi_stream_cam.Services;
+using pi_stream_cam.Models;
 
 namespace pi_stream_cam.Controllers;
 
-[AllowAnonymous]
 [ApiController]
 [Route("api/ptz")]
 public class PtzController : ControllerBase
@@ -18,9 +18,19 @@ public class PtzController : ControllerBase
         _cameraService = cameraService;
     }
 
+    private const string APP_KEY = "pi-stream-cam-mobile-v1";
+
+    private bool IsAuthenticated()
+    {
+        if (Request.Headers.TryGetValue("X-App-Key", out var appKey) && appKey == APP_KEY)
+            return true;
+        return User.Identity?.IsAuthenticated ?? false;
+    }
+
     [HttpGet("status")]
     public IActionResult GetStatus()
     {
+        if (!IsAuthenticated()) return Unauthorized();
         return Ok(new { 
             pan = _servoService.PanAngle, 
             tilt = _servoService.TiltAngle,
@@ -37,13 +47,16 @@ public class PtzController : ControllerBase
             brightness = _cameraService.Brightness,
             contrast = _cameraService.Contrast,
             saturation = _cameraService.Saturation,
+            videoflipped = _cameraService.VideoFlipped,
             presets = _servoService.Presets
         });
     }
 
     [HttpPost("presets/{index}")]
-    public IActionResult SetPreset(int index, [FromBody] PtzPreset preset)
+    public IActionResult SetPreset(int index, [FromBody] PtzPreset? preset)
     {
+        if (!IsAuthenticated()) return Unauthorized();
+        if (preset == null) return BadRequest(new { error = "Preset body is required" });
         _servoService.SetPreset(index, preset.Pan, preset.Tilt);
         return Ok(new { presets = _servoService.Presets });
     }
@@ -140,8 +153,10 @@ public class PtzController : ControllerBase
     }
 
     [HttpPost("move")]
-    public async Task<IActionResult> Move([FromBody] PtzMoveRequest request)
+    public async Task<IActionResult> Move([FromBody] PtzMoveRequest? request)
     {
+        if (request == null) return BadRequest(new { error = "Move body is required" });
+
         if (request.DeltaPan != 0)
             await _servoService.MovePanAsync(request.DeltaPan);
         if (request.DeltaTilt != 0)
@@ -156,6 +171,20 @@ public class PtzController : ControllerBase
         await _servoService.CenterAsync();
         return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle });
     }
+
+    [HttpPost("flip")]
+    public async Task<IActionResult> Flip()
+    {
+        await _servoService.FlipAsync();
+        return Ok(new { pan = _servoService.PanAngle, tilt = _servoService.TiltAngle, flipped = _servoService.IsFlipped });
+    }
+
+    [HttpPost("videoflip")]
+    public IActionResult SyncVideoFlip()
+    {
+        _cameraService.SetVideoFlip(_servoService.TiltAngle > 90);
+        return Ok(new { videoflipped = _cameraService.VideoFlipped });
+    }
 }
 
 public class PtzMoveRequest
@@ -163,3 +192,9 @@ public class PtzMoveRequest
     public int DeltaPan { get; set; }
     public int DeltaTilt { get; set; }
 }
+
+
+
+
+
+

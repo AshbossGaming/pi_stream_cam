@@ -123,6 +123,15 @@ sudo systemctl start pi-stream-cam      # Start service
 sudo journalctl -u pi-stream-cam -f    # View logs
 ```
 
+## Undeploy
+
+To remove the application and service from your Pi:
+
+```bash
+cd ~/publish
+sudo bash scripts/undeploy.sh
+```
+
 ## Adding Stream to OBS
 
 ### 1. Identify your Stream URL

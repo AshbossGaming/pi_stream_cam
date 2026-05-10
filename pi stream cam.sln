@@ -1,8 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+#
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pi stream cam", "pi stream cam\pi stream cam.csproj", "{DF55EB3F-1D7A-4DB3-83A7-D35611FD7B8A}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PTZTool", "ptz-tool\PTZTool.csproj", "{4C0E5CBB-806D-48D5-99F1-02CC52391BE2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,9 +13,5 @@ Global
 		{DF55EB3F-1D7A-4DB3-83A7-D35611FD7B8A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DF55EB3F-1D7A-4DB3-83A7-D35611FD7B8A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DF55EB3F-1D7A-4DB3-83A7-D35611FD7B8A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{4C0E5CBB-806D-48D5-99F1-02CC52391BE2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4C0E5CBB-806D-48D5-99F1-02CC52391BE2}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4C0E5CBB-806D-48D5-99F1-02CC52391BE2}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4C0E5CBB-806D-48D5-99F1-02CC52391BE2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
