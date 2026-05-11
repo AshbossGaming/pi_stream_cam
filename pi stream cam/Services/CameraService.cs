@@ -644,37 +644,55 @@ public class CameraService : IDisposable
     {
         try
         {
-            using var ms = new MemoryStream(262144);
-
-            bool started = false;
+            var stream = reader.BaseStream;
+            byte[] buf = new byte[65536];
             int prev = 0;
 
+            // Scan for SOI marker (0xFF 0xD8) using buffered reads
             while (true)
             {
-                int cur = reader.ReadByte();
-                if (cur == -1)
-                    return null;
+                int bytesRead = stream.Read(buf, 0, buf.Length);
+                if (bytesRead == 0) return null;
 
-                if (!started)
+                for (int i = 0; i < bytesRead; i++)
                 {
-                    if (prev == 0xFF && cur == 0xD8)
+                    if (prev == 0xFF && buf[i] == 0xD8)
                     {
+                        using var ms = new MemoryStream(262144);
                         ms.WriteByte(0xFF);
                         ms.WriteByte(0xD8);
-                        started = true;
-                    }
-                }
-                else
-                {
-                    ms.WriteByte((byte)cur);
+                        ms.Write(buf, i + 1, bytesRead - i - 1);
 
-                    if (prev == 0xFF && cur == 0xD9)
-                    {
-                        return ms.ToArray();
-                    }
-                }
+                        // Continue reading and scanning for EOI (0xFF 0xD9)
+                        prev = 0;
+                        while (ms.Length < 1048576)
+                        {
+                            int br = stream.Read(buf, 0, buf.Length);
+                            if (br == 0) return null;
 
-                prev = cur;
+                            int eoiPos = -1;
+                            for (int j = 0; j < br; j++)
+                            {
+                                if (prev == 0xFF && buf[j] == 0xD9)
+                                {
+                                    eoiPos = j + 1;
+                                    break;
+                                }
+                                prev = buf[j];
+                            }
+
+                            if (eoiPos >= 0)
+                            {
+                                ms.Write(buf, 0, eoiPos);
+                                return ms.ToArray();
+                            }
+
+                            ms.Write(buf, 0, br);
+                        }
+                        return null;
+                    }
+                    prev = buf[i];
+                }
             }
         }
         catch
