@@ -5,3 +5,6 @@ webrtcAddress: :0
 srtAddress: :0
 readTimeout: 30s
 writeTimeout: 30s
+paths:
+  cam:
+    source: publisher

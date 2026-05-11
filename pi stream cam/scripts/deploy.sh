@@ -46,10 +46,8 @@ sudo cp scripts/mediamtx.yml /etc/mediamtx.yml
 sudo cp scripts/mediamtx.service /etc/systemd/system/mediamtx.service
 sudo systemctl daemon-reload
 sudo systemctl enable mediamtx
-if ! systemctl is-active --quiet mediamtx; then
-    sudo systemctl start mediamtx
-    sleep 1
-fi
+sudo systemctl restart mediamtx
+sleep 1
 echo "MediaMTX service installed and running"
 
 echo "Creating directory structure..."
