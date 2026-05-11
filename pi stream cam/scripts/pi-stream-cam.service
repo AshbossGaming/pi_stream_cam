@@ -1,8 +1,8 @@
 [Unit]
 Description=Pi Stream Cam - PTZ Camera Surveillance System
 Documentation=https://github.com/ash12/pi-stream-cam
-After=network.target
-Wants=network-online.target
+After=network.target mediamtx.service
+Wants=network-online.target mediamtx.service
 ConditionPathExists=/dev/i2c-1
 
 [Service]

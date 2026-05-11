@@ -128,10 +128,11 @@ This configures the static IP on eth0 and reboots the Pi.
 ## Service Management
 
 ```bash
-sudo systemctl status pi-stream-cam    # Check status
-sudo systemctl stop pi-stream-cam       # Stop service
-sudo systemctl start pi-stream-cam      # Start service
-sudo journalctl -u pi-stream-cam -f    # View logs
+sudo systemctl status pi-stream-cam     # Check camera service
+sudo systemctl status mediamtx          # Check RTSP server
+sudo systemctl stop/start/restart pi-stream-cam
+sudo journalctl -u pi-stream-cam -f     # Camera service logs
+sudo journalctl -u mediamtx -f          # RTSP server logs
 ```
 
 ## Undeploy
@@ -197,19 +198,20 @@ MediaMTX (RTSP server on :8554)
 OBS Media Source → YouTube RTMPS
 ```
 
-The .NET app spawns and manages the rpicam-vid + ffmpeg pipeline and the MediaMTX RTSP server. Only the capture pipeline restarts on camera setting changes (zoom, AF mode, flip); MediaMTX stays running so OBS can auto-reconnect.
+MediaMTX runs as a separate systemd service (`mediamtx.service`). The .NET app only manages the rpicam-vid + ffmpeg pipeline. MediaMTX is stable and independent — app restarts/crashes do not affect the RTSP server, so OBS maintains its connection.
 
 ## Deploy Architecture
 
 - **publish.sh** builds a self-contained linux-arm64 .NET app
-- **deploy.sh** installs dependencies (libcamera-apps, ffmpeg, mediamtx), copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the systemd service
+- **deploy.sh** installs dependencies (libcamera-apps, ffmpeg, mediamtx), configures and enables MediaMTX as a persistent systemd service, copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the pi-stream-cam service
 - The last 3 releases are kept; older ones are pruned
-- The systemd unit uses `DynamicUser`, cgroups (384M max), and `Nice=10` for minimal interference
+- The pi-stream-cam unit depends on mediamtx.service (`After=mediamtx.service`), uses `DynamicUser`, cgroups (384M max), and `Nice=10` for minimal interference
 
 ## Troubleshooting
 
 - **Camera not found**: Ensure camera is enabled in `raspi-config`
 - **Servos not moving**: Check I2C is enabled and PCA9685 is wired correctly
-- **Stream not connecting**: Check `ffmpeg` and `mediamtx` are installed, verify port 8554 is reachable (`nc -zv <pi-ip> 8554`), check service logs
+- **Stream not connecting**: Check `ffmpeg` and `mediamtx` are installed (`which mediamtx`), verify MediaMTX is running (`systemctl status mediamtx`), check port 8554 is reachable (`nc -zv <pi-ip> 8554`), check service logs
 - **Shutdown/reboot not working**: Check `/usr/local/bin/pi-cam-power` exists and has setuid (`ls -l /usr/local/bin/pi-cam-power` should show `-rwsr-xr-x root root`)
+- **OBS black screen**: Check if MediaMTX is running (`systemctl status mediamtx`), verify ffmpeg is pushing data (`journalctl -u pi-stream-cam -f` should show pipeline activity), try `rtsp_transport udp` instead of tcp if network has issues
 - **Check logs**: `sudo journalctl -u pi-stream-cam -f`

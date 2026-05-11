@@ -40,6 +40,18 @@ else
     fi
 fi
 
+echo "Installing MediaMTX systemd service..."
+sudo mkdir -p /etc/mediamtx
+sudo cp scripts/mediamtx.yml /etc/mediamtx.yml
+sudo cp scripts/mediamtx.service /etc/systemd/system/mediamtx.service
+sudo systemctl daemon-reload
+sudo systemctl enable mediamtx
+if ! systemctl is-active --quiet mediamtx; then
+    sudo systemctl start mediamtx
+    sleep 1
+fi
+echo "MediaMTX service installed and running"
+
 echo "Creating directory structure..."
 sudo mkdir -p "$RELEASE_DIR"
 sudo mkdir -p "$RECORDINGS_DIR"

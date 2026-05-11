@@ -1,0 +1,7 @@
+rtspAddress: :8554
+rtmpAddress: :0
+hlsAddress: :0
+webrtcAddress: :0
+srtAddress: :0
+readTimeout: 30s
+writeTimeout: 30s
