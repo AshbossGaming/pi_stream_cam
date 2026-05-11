@@ -381,25 +381,21 @@
             // Presets are loaded via fetchStatus() from the server
         }
         
-        function applyZoom(zoom) {
-            const img = document.getElementById('streamFrame');
-            img.style.transform = zoom > 1 ? 'scale(' + zoom + ')' : 'none';
-        }
-
         function updateZoom() {
             const slider = document.getElementById('zoomSlider');
             const value = parseInt(slider.value);
             document.getElementById('zoomValue').textContent = value + 'x';
-            currentZoom = value;
-            applyZoom(value);
         }
 
         async function commitZoom() {
+            currentZoom = parseInt(document.getElementById('zoomSlider').value);
+            document.getElementById('zoomValue').textContent = currentZoom + 'x';
             const result = await apiCall('/api/ptz/zoom/' + currentZoom, { method: 'POST' });
             if (result) {
                 currentZoom = result.zoom;
-                applyZoom(currentZoom);
-                updateStatus('Zoom: ' + result.zoom + 'x', 'success');
+                document.getElementById('zoomSlider').value = currentZoom;
+                document.getElementById('zoomValue').textContent = currentZoom + 'x';
+                updateStatus('Zoom: ' + currentZoom + 'x', 'success');
             }
         }
         
@@ -597,7 +593,6 @@
                 updateSliders();
                 document.getElementById('zoomSlider').value = currentZoom;
                 document.getElementById('zoomValue').textContent = currentZoom + 'x';
-                applyZoom(currentZoom);
                 document.getElementById('focusSlider').value = currentFocus;
                 document.getElementById('focusValue').textContent = currentFocus;
                 document.getElementById('exposureSlider').value = exposureComp;
@@ -631,7 +626,6 @@
         }
 
         document.getElementById('streamFrame').addEventListener('load', function() {
-            applyZoom(currentZoom);
         });
 
         updateCamUrl();

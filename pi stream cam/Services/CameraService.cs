@@ -347,7 +347,7 @@ public class CameraService : IDisposable
         {
             try
             {
-                await Task.Delay(200, token);
+                await Task.Delay(50, token);
 
                 if (!token.IsCancellationRequested)
                 {
