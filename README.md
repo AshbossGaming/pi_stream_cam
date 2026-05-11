@@ -148,20 +148,18 @@ sudo systemctl daemon-reload
 
 ## Adding Stream to OBS
 
-The Pi serves H.264 video as MPEG-TS over UDP on port `5004`:
+The Pi runs a MediaMTX RTSP server. The camera pipeline pushes H.264 video to localhost, and MediaMTX serves it on port `8554`:
 
 ```
-udp://<pi-ip>:5004
+rtsp://<pi-ip>:8554/cam
 ```
-
-In OBS, use `udp://@:5004` as the Media Source URL.
 
 ### Add as Media Source
 1. Open OBS Studio.
 2. In the **Sources** dock, click **+** and select **Media Source**.
 3. Name it (e.g., "Pi Cam").
 4. Uncheck **Local File**.
-5. In **Input**, paste `udp://@:5004`.
+5. In **Input**, paste `rtsp://<pi-ip>:8554/cam` (replace `<pi-ip>` with the Pi's IP address).
 6. Set **Network Caching** to `100ms` (lower latency).
 7. Set **Close file when inactive** to `No`.
 8. Click **OK**.
@@ -188,19 +186,23 @@ rpicam-vid --codec h264 ... --output -
     |
     | (pipe stdout → stdin)
     v
-ffmpeg -i pipe: -c copy -f rtsp -listen 1 rtsp://0.0.0.0:8554/cam
+ffmpeg -i pipe: -c copy -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam
     |
-    | (RTSP over TCP)
+    | (push to local MediaMTX server)
+    v
+MediaMTX (RTSP server on :8554)
+    |
+    | (serve to network clients)
     v
 OBS Media Source → YouTube RTMPS
 ```
 
-The .NET app spawns and manages both processes, restarting the pipeline on camera setting changes (zoom, AF mode, flip).
+The .NET app spawns and manages the rpicam-vid + ffmpeg pipeline and the MediaMTX RTSP server. Only the capture pipeline restarts on camera setting changes (zoom, AF mode, flip); MediaMTX stays running so OBS can auto-reconnect.
 
 ## Deploy Architecture
 
 - **publish.sh** builds a self-contained linux-arm64 .NET app
-- **deploy.sh** installs dependencies (libcamera-apps, ffmpeg), copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the systemd service
+- **deploy.sh** installs dependencies (libcamera-apps, ffmpeg, mediamtx), copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the systemd service
 - The last 3 releases are kept; older ones are pruned
 - The systemd unit uses `DynamicUser`, cgroups (384M max), and `Nice=10` for minimal interference
 
@@ -208,6 +210,6 @@ The .NET app spawns and manages both processes, restarting the pipeline on camer
 
 - **Camera not found**: Ensure camera is enabled in `raspi-config`
 - **Servos not moving**: Check I2C is enabled and PCA9685 is wired correctly
-- **Stream not connecting**: Check `ffmpeg` is installed (`which ffmpeg`), verify port 5004 is open, check service logs
+- **Stream not connecting**: Check `ffmpeg` and `mediamtx` are installed, verify port 8554 is reachable (`nc -zv <pi-ip> 8554`), check service logs
 - **Shutdown/reboot not working**: Check `/usr/local/bin/pi-cam-power` exists and has setuid (`ls -l /usr/local/bin/pi-cam-power` should show `-rwsr-xr-x root root`)
 - **Check logs**: `sudo journalctl -u pi-stream-cam -f`

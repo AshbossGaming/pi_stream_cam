@@ -22,6 +22,24 @@ sudo apt-get install -y -qq \
     ffmpeg \
     build-essential
 
+echo "Installing MediaMTX RTSP server..."
+if command -v mediamtx &>/dev/null; then
+    echo "MediaMTX already installed, skipping download"
+else
+    wget -q -O /tmp/mediamtx.tar.gz "https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_linux_arm64v8.tar.gz" || {
+        echo "Failed to download MediaMTX. Install manually:"
+        echo "  wget https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_linux_arm64v8.tar.gz"
+        echo "  sudo tar -xzf mediamtx_linux_arm64v8.tar.gz -C /usr/local/bin/ mediamtx"
+    }
+    if [ -f /tmp/mediamtx.tar.gz ]; then
+        tar -xzf /tmp/mediamtx.tar.gz -C /tmp/
+        sudo mv /tmp/mediamtx /usr/local/bin/mediamtx
+        sudo chmod +x /usr/local/bin/mediamtx
+        rm -f /tmp/mediamtx.tar.gz
+        echo "MediaMTX installed to /usr/local/bin/mediamtx"
+    fi
+fi
+
 echo "Creating directory structure..."
 sudo mkdir -p "$RELEASE_DIR"
 sudo mkdir -p "$RECORDINGS_DIR"

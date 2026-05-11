@@ -224,7 +224,7 @@ app.MapGet("/api/status", () =>
 
         endpoints = new
         {
-            stream = new { url = camera.StreamUrl, type = "MPEG-TS/H.264 over UDP" },
+            stream = new { url = camera.StreamUrl, type = "RTSP/H.264" },
             status = new { url = $"/api/status", type = "application/json" },
             ptzStatus = new { url = $"/api/ptz/status", type = "application/json" },
             ptzMove = new { url = $"/api/ptz/move", method = "POST" },
@@ -244,7 +244,7 @@ app.MapGet("/api/status", () =>
 app.MapGet("/", () => Results.Ok(new
 {
     web = $"http://picam1:{port}",
-    stream = $"udp://picam1:5004",
+            stream = $"rtsp://picam1:8554/cam",
     status = $"/api/status",
     ptzStatus = "/api/ptz/status",
     ptzMove = "POST /api/ptz/move",

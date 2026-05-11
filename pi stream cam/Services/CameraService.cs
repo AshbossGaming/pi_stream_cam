@@ -47,8 +47,11 @@ public class CameraService : IDisposable
 
     private Process? _captureProcess;
     private Process? _ffmpegProcess;
+    private Process? _mediamtxProcess;
+    private static readonly string MediaMtxBinary = "/usr/local/bin/mediamtx";
+    private static readonly string MediaMtxConfigPath = "/var/lib/pi-stream-cam/mediamtx.yml";
 
-    public string StreamUrl => $"udp://picam1:5004";
+    public string StreamUrl => $"rtsp://picam1:8554/cam";
 
     public CameraService()
     {
@@ -287,9 +290,7 @@ public class CameraService : IDisposable
             return;
 
         _restartCts?.Cancel();
-
         _restartCts = new CancellationTokenSource();
-
         var token = _restartCts.Token;
 
         Task.Run(async () =>
@@ -297,26 +298,21 @@ public class CameraService : IDisposable
             try
             {
                 await Task.Delay(50, token);
-
                 if (!token.IsCancellationRequested)
                 {
-                    try
+                    Console.WriteLine("[Camera] Restarting capture...");
+                    foreach (var proc in new[] { _captureProcess, _ffmpegProcess })
                     {
-                        if (_captureProcess != null &&
-                            !_captureProcess.HasExited)
+                        try
                         {
-                            Console.WriteLine("[Camera] Restarting capture...");
-                            _captureProcess.Kill(true);
+                            if (proc != null && !proc.HasExited)
+                                proc.Kill(true);
                         }
-                    }
-                    catch
-                    {
+                        catch { }
                     }
                 }
             }
-            catch
-            {
-            }
+            catch { }
         });
     }
 
@@ -344,7 +340,7 @@ public class CameraService : IDisposable
     {
         _captureCts?.Cancel();
 
-        foreach (var proc in new[] { _captureProcess, _ffmpegProcess })
+        foreach (var proc in new[] { _captureProcess, _ffmpegProcess, _mediamtxProcess })
         {
             try
             {
@@ -357,6 +353,7 @@ public class CameraService : IDisposable
 
         _captureProcess = null;
         _ffmpegProcess = null;
+        _mediamtxProcess = null;
         _captureCts = null;
     }
 
@@ -443,7 +440,61 @@ public class CameraService : IDisposable
         return args.ToArray();
     }
 
-    private static readonly string FfmpegArgs = "-i pipe: -c copy -f mpegts udp://0.0.0.0:5004";
+    private static readonly string FfmpegArgs = "-i pipe: -c copy -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
+
+    private void EnsureMediaMtxRunning()
+    {
+        try
+        {
+            if (_mediamtxProcess != null && !_mediamtxProcess.HasExited)
+                return;
+
+            _mediamtxProcess?.Dispose();
+            _mediamtxProcess = null;
+
+            var dir = Path.GetDirectoryName(MediaMtxConfigPath)!;
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllText(MediaMtxConfigPath,
+                "rtspAddress: :8554\n" +
+                "rtmpAddress: :0\n" +
+                "hlsAddress: :0\n" +
+                "webrtcAddress: :0\n" +
+                "srtAddress: :0\n" +
+                "readTimeout: 30s\n" +
+                "writeTimeout: 30s\n");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = MediaMtxBinary,
+                Arguments = MediaMtxConfigPath,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            _mediamtxProcess = Process.Start(psi);
+            if (_mediamtxProcess == null)
+            {
+                Console.WriteLine("[MEDIAMTX] Failed to start");
+                return;
+            }
+
+            _mediamtxProcess.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                    Console.WriteLine($"mediamtx: {e.Data}");
+            };
+            _mediamtxProcess.BeginErrorReadLine();
+
+            Console.WriteLine("[MEDIAMTX] Started");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MEDIAMTX] Error: {ex.Message}");
+        }
+    }
 
     private async Task CaptureLoop(
         int width,
@@ -455,6 +506,14 @@ public class CameraService : IDisposable
         {
             try
             {
+                EnsureMediaMtxRunning();
+
+                if (_mediamtxProcess == null || _mediamtxProcess.HasExited)
+                {
+                    await Task.Delay(1000, token);
+                    continue;
+                }
+
                 var args = BuildRpicamVidArgs(width, height, framerate);
                 Console.WriteLine($"[PIPELINE] rpicam-vid {string.Join(" ", args)}");
 
