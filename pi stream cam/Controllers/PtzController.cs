@@ -140,7 +140,7 @@ public class PtzController : ControllerBase
 
     private void SyncFlip()
     {
-        _cameraService.SetVideoFlip(_servoService.TiltAngle > 90);
+        _cameraService.SetVideoFlip(_servoService.TiltAngle < 90);
     }
 
     [HttpPost("pan/{angle}")]

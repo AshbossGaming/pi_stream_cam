@@ -311,7 +311,7 @@
         }
         
         async function syncVideoFlip() {
-            const shouldFlip = currentTilt > 90;
+            const shouldFlip = currentTilt < 90;
             if (shouldFlip !== videoFlipped) {
                 const result = await apiCall('/api/ptz/videoflip', { method: 'POST' });
                 if (result) videoFlipped = result.videoflipped;

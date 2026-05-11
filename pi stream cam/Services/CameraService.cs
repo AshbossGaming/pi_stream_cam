@@ -26,7 +26,7 @@ public class CameraService : IDisposable
     private int _brightness = 0;
     private int _contrast = 1;
     private int _saturation = 1;
-    private int _quality = 85;
+    private int _quality = 40;
     private bool _videoFlipped;
 
     private static readonly string[] AwbPresets = { "auto", "incandescent", "tungsten", "fluorescent", "daylight", "cloudy", "shade", "custom" };
@@ -309,7 +309,6 @@ public class CameraService : IDisposable
         Console.WriteLine($"JPEG Quality: {_quality}");
 
         SaveState();
-        RestartCapture();
     }
 
     public void SignalStale()
@@ -379,9 +378,7 @@ public class CameraService : IDisposable
     {
         if (!_hasCamera)
         {
-            Console.WriteLine(
-                "Camera capture requires gst-launch-1.0");
-
+            Console.WriteLine("Camera capture requires rpicam-vid");
             return;
         }
 
@@ -428,11 +425,14 @@ public class CameraService : IDisposable
         {
             "--codec", "mjpeg",
             "--output", "-",
+            "--inline",
+            "--nopreview",
             "--width", width.ToString(),
             "--height", height.ToString(),
             "--framerate", framerate.ToString(),
             "--quality", _quality.ToString(),
-            "--timeout", "0"
+            "--timeout", "0",
+            "--buffer-count", "1"
         };
 
         if (_zoom > 1)
@@ -527,8 +527,11 @@ public class CameraService : IDisposable
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = null,
                     CreateNoWindow = true
- };
+                };
+
+                psi.Environment["LIBCAMERA_LOG_LEVELS"] = "ERROR";
 
                 var process = Process.Start(psi);
 
@@ -546,7 +549,7 @@ public class CameraService : IDisposable
                 {
                     if (!string.IsNullOrWhiteSpace(e.Data))
                     {
-                        Console.WriteLine($"gst: {e.Data}");
+                        Console.WriteLine($"rpicam: {e.Data}");
                     }
                 };
 
@@ -641,55 +644,37 @@ public class CameraService : IDisposable
     {
         try
         {
-            var stream = reader.BaseStream;
-            byte[] buf = new byte[8192];
-            int prev = -1;
+            using var ms = new MemoryStream(262144);
 
-            // Scan for SOI marker (0xFF 0xD8) using buffered reads
+            bool started = false;
+            int prev = 0;
+
             while (true)
             {
-                int bytesRead = stream.Read(buf, 0, buf.Length);
-                if (bytesRead == 0) return null;
+                int cur = reader.ReadByte();
+                if (cur == -1)
+                    return null;
 
-                for (int i = 0; i < bytesRead; i++)
+                if (!started)
                 {
-                    if (prev == 0xFF && buf[i] == 0xD8)
+                    if (prev == 0xFF && cur == 0xD8)
                     {
-                        using var ms = new MemoryStream(262144);
                         ms.WriteByte(0xFF);
                         ms.WriteByte(0xD8);
-                        ms.Write(buf, i + 1, bytesRead - i - 1);
-
-                        // Continue reading and scanning for EOI (0xFF 0xD9)
-                        prev = -1;
-                        while (ms.Length < 1048576)
-                        {
-                            int br = stream.Read(buf, 0, buf.Length);
-                            if (br == 0) return null;
-
-                            int eoiPos = -1;
-                            for (int j = 0; j < br; j++)
-                            {
-                                if (prev == 0xFF && buf[j] == 0xD9)
-                                {
-                                    eoiPos = j + 1;
-                                    break;
-                                }
-                                prev = buf[j];
-                            }
-
-                            if (eoiPos >= 0)
-                            {
-                                ms.Write(buf, 0, eoiPos);
-                                return ms.ToArray();
-                            }
-
-                            ms.Write(buf, 0, br);
-                        }
-                        return null;
+                        started = true;
                     }
-                    prev = buf[i];
                 }
+                else
+                {
+                    ms.WriteByte((byte)cur);
+
+                    if (prev == 0xFF && cur == 0xD9)
+                    {
+                        return ms.ToArray();
+                    }
+                }
+
+                prev = cur;
             }
         }
         catch

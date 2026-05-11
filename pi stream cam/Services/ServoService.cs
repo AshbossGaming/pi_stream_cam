@@ -23,8 +23,8 @@ public class ServoService : IDisposable
     public int PanAngle => _panAngle;
     public int TiltAngle => _tiltAngle;
     public IReadOnlyList<PtzPreset> Presets => _presets.AsReadOnly();
-    public bool IsFlipped => _tiltAngle > 90;
-    public bool IsPanInverted => _tiltAngle > 90;
+    public bool IsFlipped => _tiltAngle < 90;
+    public bool IsPanInverted => _tiltAngle < 90;
 
     public ServoService(int panChannel = 0, int tiltChannel = 1)
     {
@@ -205,13 +205,13 @@ public class ServoService : IDisposable
 
     public Task MovePanAsync(int delta)
     {
-        if (_tiltAngle > 90)
+        if (_tiltAngle < 90)
             delta = -delta;
         return SetPanAsync(_panAngle + delta);
     }
     public Task MoveTiltAsync(int delta)
     {
-        if (_tiltAngle > 90)
+        if (_tiltAngle < 90)
             delta = -delta;
         return SetTiltAsync(_tiltAngle + delta);
     }
