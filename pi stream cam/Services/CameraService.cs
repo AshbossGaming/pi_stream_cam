@@ -50,6 +50,8 @@ public class CameraService : IDisposable
     public SemaphoreSlim FrameSignal => _frameSignal;
 
     private Process? _captureProcess;
+    private byte[]? _frameTail;
+    private int _frameTailLen;
 
     private long _frameCount;
     private long _droppedFrames;
@@ -645,55 +647,80 @@ public class CameraService : IDisposable
         try
         {
             var stream = reader.BaseStream;
-            byte[] buf = new byte[8192];
+            byte[] buf = new byte[65536];
             int prev = 0;
+            int bufLen = 0;
 
-            // Scan for SOI marker (0xFF 0xD8) using buffered reads
-            while (true)
+            // Prepend any tail bytes saved from the previous call
+            if (_frameTail != null && _frameTailLen > 0)
             {
-                int bytesRead = stream.Read(buf, 0, buf.Length);
-                if (bytesRead == 0) return null;
-
-                for (int i = 0; i < bytesRead; i++)
-                {
-                    if (prev == 0xFF && buf[i] == 0xD8)
-                    {
-                        using var ms = new MemoryStream(262144);
-                        ms.WriteByte(0xFF);
-                        ms.WriteByte(0xD8);
-                        ms.Write(buf, i + 1, bytesRead - i - 1);
-
-                        // Continue reading and scanning for EOI (0xFF 0xD9)
-                        prev = 0;
-                        while (ms.Length < 1048576)
-                        {
-                            int br = stream.Read(buf, 0, buf.Length);
-                            if (br == 0) return null;
-
-                            int eoiPos = -1;
-                            for (int j = 0; j < br; j++)
-                            {
-                                if (prev == 0xFF && buf[j] == 0xD9)
-                                {
-                                    eoiPos = j + 1;
-                                    break;
-                                }
-                                prev = buf[j];
-                            }
-
-                            if (eoiPos >= 0)
-                            {
-                                ms.Write(buf, 0, eoiPos);
-                                return ms.ToArray();
-                            }
-
-                            ms.Write(buf, 0, br);
-                        }
-                        return null;
-                    }
-                    prev = buf[i];
-                }
+                Array.Copy(_frameTail, 0, buf, 0, _frameTailLen);
+                bufLen = _frameTailLen;
+                _frameTail = null;
+                _frameTailLen = 0;
             }
+
+            // Fill the rest of the buffer from the pipe
+            int read = stream.Read(buf, bufLen, buf.Length - bufLen);
+            if (read == 0) return null;
+            bufLen += read;
+
+            // Scan for SOI marker (0xFF 0xD8)
+            for (int i = 0; i < bufLen; i++)
+            {
+                if (prev == 0xFF && buf[i] == 0xD8)
+                {
+                    using var ms = new MemoryStream(262144);
+                    ms.WriteByte(0xFF);
+                    ms.WriteByte(0xD8);
+
+                    int afterSoi = bufLen - i - 1;
+                    if (afterSoi > 0)
+                        ms.Write(buf, i + 1, afterSoi);
+
+                    // Continue reading and scanning for EOI (0xFF 0xD9)
+                    prev = 0;
+                    while (ms.Length < 1048576)
+                    {
+                        int br = stream.Read(buf, 0, buf.Length);
+                        if (br == 0) return null;
+
+                        int eoiPos = -1;
+                        for (int j = 0; j < br; j++)
+                        {
+                            if (prev == 0xFF && buf[j] == 0xD9)
+                            {
+                                eoiPos = j + 1;
+                                break;
+                            }
+                            prev = buf[j];
+                        }
+
+                        if (eoiPos >= 0)
+                        {
+                            ms.Write(buf, 0, eoiPos);
+
+                            // Save any bytes after EOI for the next frame
+                            int tail = br - eoiPos;
+                            if (tail > 0)
+                            {
+                                _frameTail = new byte[buf.Length];
+                                Array.Copy(buf, eoiPos, _frameTail, 0, tail);
+                                _frameTailLen = tail;
+                            }
+
+                            return ms.ToArray();
+                        }
+
+                        ms.Write(buf, 0, br);
+                    }
+                    return null;
+                }
+                prev = buf[i];
+            }
+
+            // SOI not found in this batch — try again
+            return ReadOneFrame(reader);
         }
         catch
         {
