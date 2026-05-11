@@ -645,7 +645,7 @@ public class CameraService : IDisposable
         try
         {
             var stream = reader.BaseStream;
-            byte[] buf = new byte[65536];
+            byte[] buf = new byte[8192];
             int prev = 0;
 
             // Scan for SOI marker (0xFF 0xD8) using buffered reads
