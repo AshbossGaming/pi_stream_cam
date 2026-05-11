@@ -3,14 +3,11 @@ using pi_stream_cam.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var controlPort = builder.Configuration.GetValue("CONTROL_PORT", 5000);
-var streamPort = builder.Configuration.GetValue("STREAM_PORT", 5001);
+var port = builder.Configuration.GetValue("PORT", 5000);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(controlPort);
-    if (streamPort != controlPort)
-        options.ListenAnyIP(streamPort);
+    options.ListenAnyIP(port);
 });
 
 builder.Services.AddControllers();
@@ -40,32 +37,6 @@ builder.Services.AddSingleton(cameraService);
 builder.Services.AddSingleton(servoService);
 
 var app = builder.Build();
-
-app.Use(async (context, next) =>
-{
-    if (streamPort == controlPort)
-    {
-        await next();
-        return;
-    }
-
-    var requestPort = context.Request.Host.Port;
-    var isStreamRequest = context.Request.Path.StartsWithSegments("/api/stream");
-
-    if (requestPort == streamPort && !isStreamRequest)
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    if (requestPort == controlPort && isStreamRequest)
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    await next();
-});
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -227,10 +198,6 @@ app.MapGet("/api/status", () =>
         {
             capturing = camera.IsCapturing,
             hasCamera = camera.IsCapturing,
-            frameCount = camera.FrameCount,
-            droppedFrames = camera.DroppedFrames,
-            fps = camera.CurrentFps,
-            uptimeSeconds = camera.Uptime.TotalSeconds,
             zoom = camera.Zoom,
             focus = camera.Focus,
             autofocus = camera.AutofocusEnabled,
@@ -257,17 +224,16 @@ app.MapGet("/api/status", () =>
 
         endpoints = new
         {
-            mjpeg = new { url = $"http://picam1:{streamPort}/api/stream/mjpeg", type = "multipart/x-mixed-replace" },
-            status = new { url = $"http://picam1:{controlPort}/api/status", type = "application/json" },
-            ptzStatus = new { url = $"http://picam1:{controlPort}/api/ptz/status", type = "application/json" },
-            ptzMove = new { url = $"http://picam1:{controlPort}/api/ptz/move", method = "POST" },
-            ptzCenter = new { url = $"http://picam1:{controlPort}/api/ptz/center", method = "POST" }
+            rtsp = new { url = camera.StreamUrl, type = "RTSP/H.264" },
+            status = new { url = $"/api/status", type = "application/json" },
+            ptzStatus = new { url = $"/api/ptz/status", type = "application/json" },
+            ptzMove = new { url = $"/api/ptz/move", method = "POST" },
+            ptzCenter = new { url = $"/api/ptz/center", method = "POST" }
         },
 
         system = new
         {
-            controlPort,
-            streamPort,
+            port,
             platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
             processId = Environment.ProcessId,
             startTime = DateTime.UtcNow.ToString("o")
@@ -277,8 +243,8 @@ app.MapGet("/api/status", () =>
 
 app.MapGet("/", () => Results.Ok(new
 {
-    control = $"http://picam1:{controlPort}",
-    stream = $"http://picam1:{streamPort}/api/stream/mjpeg",
+    web = $"http://picam1:{port}",
+    rtsp = $"rtsp://picam1:8554/cam",
     status = $"/api/status",
     ptzStatus = "/api/ptz/status",
     ptzMove = "POST /api/ptz/move",

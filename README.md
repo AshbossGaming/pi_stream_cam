@@ -1,6 +1,6 @@
 # Pi Stream Cam
 
-A Raspberry Pi-based PTZ camera system with web control, featuring the Arducam 16MP IMX519 camera and MG90S servos controlled via PCA9685.
+A Raspberry Pi-based PTZ camera system with H.264 RTSP streaming and web control, featuring the Arducam 16MP IMX519 camera and MG90S servos controlled via PCA9685.
 
 ## Hardware Requirements
 
@@ -29,6 +29,7 @@ Tilt servo -> Channel 1
 - Raspberry Pi OS (64-bit recommended)
 - .NET 8 SDK (for building)
 - libcamera (comes with Pi OS)
+- ffmpeg (installed by deploy.sh)
 
 ## Quick Start
 
@@ -61,10 +62,9 @@ Then reboot: `sudo reboot`
 ### 4. Access the Camera
 
 After reboot, navigate to:
-- **Control interface**: `http://<pi-ip>:5000/`
-- **Stream endpoint**: `http://<pi-ip>:5001/api/stream/mjpeg`
-- **Dock view**: `/dock` (full control UI, requires login)
-- **Mobile view**: `/mobile` (redirects to dock)
+- **Web interface**: `http://<pi-ip>:5000/`
+- **Dock UI**: `/dock` (PTZ/camera controls, requires login)
+- **RTSP stream**: `rtsp://<pi-ip>:8554/cam` (add as Media Source in OBS)
 
 Default password: `admin` (change via `Password` config or env var)
 
@@ -90,7 +90,7 @@ Default password: `admin` (change via `Password` config or env var)
 - `POST /api/ptz/saturation/{value}` - Saturation (0, 1, 2)
 
 ### Stream
-- `GET /api/stream/mjpeg` - MJPEG stream (hardware-accelerated via rpicam-vid)
+- `GET /api/stream/info` - RTSP stream URL and info
 
 ### System
 - `POST /api/system/shutdown` - Shutdown the Pi (body: `{"password": "..."}`)
@@ -106,8 +106,7 @@ Set via environment variables or `appsettings.json`:
 ```json
 {
   "Password": "admin",
-  "CONTROL_PORT": 5000,
-  "STREAM_PORT": 5001
+  "PORT": 5000
 }
 ```
 
@@ -149,28 +148,30 @@ sudo systemctl daemon-reload
 
 ## Adding Stream to OBS
 
-### 1. Identify your Stream URL
-The MJPEG stream is served on the stream port (default `5001`):
+The Pi serves H.264 video via RTSP on port `8554`:
+
 ```
-http://<pi-ip>:5001/api/stream/mjpeg
+rtsp://<pi-ip>:8554/cam
 ```
 
-*Note: Replace with your Raspberry Pi's actual IP.*
-
-### 2. Add as a Browser Source (Recommended)
+### Add as Media Source
 1. Open OBS Studio.
-2. In the **Sources** dock, click **+** and select **Browser**.
-3. Name it (e.g., "Pi Cam 1").
-4. In **URL**, paste your stream URL.
-5. Set **Width** and **Height** (e.g., `1280` x `720`).
-6. Click **OK**.
+2. In the **Sources** dock, click **+** and select **Media Source**.
+3. Name it (e.g., "Pi Cam").
+4. Uncheck **Local File**.
+5. In **Input**, paste `rtsp://<pi-ip>:8554/cam`.
+6. Set **Network Caching** to `100ms` (lower latency).
+7. Set **Close file when inactive** to `No`.
+8. Click **OK**.
 
-### 3. Alternative: Media Source
-1. Click **+** in **Sources** and select **Media Source**.
-2. Uncheck **Local File**.
-3. In **Input**, paste your stream URL.
-4. Set **Input Format** to `mjpeg`.
-5. Click **OK**.
+### Streaming to YouTube from OBS
+Once the RTSP source is in OBS:
+1. Go to **Settings > Stream**.
+2. Select **YouTube - RTMPS**.
+3. Paste your YouTube stream key.
+4. Click **Start Streaming**.
+
+The hardware H.264 encoder on the Pi delivers the stream at 2 Mbps, 720p30, with keyframes every 30 frames.
 
 ## System Power Control
 
@@ -178,10 +179,26 @@ The dock UI includes **Shutdown** and **Reboot** buttons. These require re-enter
 
 On the Pi, the service runs as a `DynamicUser` without sudo privileges, so a setuid helper binary (`/usr/local/bin/pi-cam-power`) is used to execute `systemctl poweroff` / `systemctl reboot` as root. The deploy script compiles and installs this helper automatically.
 
+## Pipeline Architecture
+
+```
+rpicam-vid --codec h264 ... --output -
+    |
+    | (pipe stdout → stdin)
+    v
+ffmpeg -i pipe: -c copy -f rtsp -listen 1 rtsp://0.0.0.0:8554/cam
+    |
+    | (RTSP over TCP)
+    v
+OBS Media Source → YouTube RTMPS
+```
+
+The .NET app spawns and manages both processes, restarting the pipeline on camera setting changes (zoom, AF mode, flip).
+
 ## Deploy Architecture
 
 - **publish.sh** builds a self-contained linux-arm64 .NET app
-- **deploy.sh** installs dependencies, copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the systemd service
+- **deploy.sh** installs dependencies (libcamera-apps, ffmpeg), copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the systemd service
 - The last 3 releases are kept; older ones are pruned
 - The systemd unit uses `DynamicUser`, cgroups (384M max), and `Nice=10` for minimal interference
 
@@ -189,6 +206,6 @@ On the Pi, the service runs as a `DynamicUser` without sudo privileges, so a set
 
 - **Camera not found**: Ensure camera is enabled in `raspi-config`
 - **Servos not moving**: Check I2C is enabled and PCA9685 is wired correctly
-- **Can't access from browser**: Check firewall, ensure service is running
+- **RTSP not connecting**: Check `ffmpeg` is installed (`which ffmpeg`), verify port 8554 is open, check service logs
 - **Shutdown/reboot not working**: Check `/usr/local/bin/pi-cam-power` exists and has setuid (`ls -l /usr/local/bin/pi-cam-power` should show `-rwsr-xr-x root root`)
 - **Check logs**: `sudo journalctl -u pi-stream-cam -f`

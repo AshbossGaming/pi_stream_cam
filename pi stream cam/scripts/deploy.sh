@@ -19,6 +19,7 @@ echo "Installing dependencies..."
 sudo apt-get update -qq
 sudo apt-get install -y -qq \
     libcamera-apps \
+    ffmpeg \
     build-essential
 
 echo "Creating directory structure..."

@@ -9,8 +9,6 @@ namespace pi_stream_cam.Services;
 public class CameraService : IDisposable
 {
     private readonly bool _hasCamera;
-    private readonly SemaphoreSlim _frameSignal = new(0, 1);
-    private volatile byte[]? _latestFrame;
     private CancellationTokenSource? _captureCts;
     private CancellationTokenSource? _restartCts;
 
@@ -46,24 +44,11 @@ public class CameraService : IDisposable
     public int Quality => _quality;
     public bool IsCapturing => _captureCts != null && !_captureCts.IsCancellationRequested;
     public bool VideoFlipped => _videoFlipped;
-    public SemaphoreSlim FrameSignal => _frameSignal;
 
     private Process? _captureProcess;
-    private byte[]? _frameTail;
-    private int _frameTailLen;
-    private byte[]? _frameTailBuffer;
+    private Process? _ffmpegProcess;
 
-    private long _frameCount;
-    private long _droppedFrames;
-    private DateTime _captureStartTime;
-    private int _lastFpsSample;
-    private int _fps;
-    private DateTime _lastFpsTime;
-
-    public long FrameCount => Interlocked.Read(ref _frameCount);
-    public long DroppedFrames => Interlocked.Read(ref _droppedFrames);
-    public int CurrentFps => _fps;
-    public TimeSpan Uptime => IsCapturing ? DateTime.UtcNow - _captureStartTime : TimeSpan.Zero;
+    public string StreamUrl => $"rtsp://picam1:8554/cam";
 
     public CameraService()
     {
@@ -78,12 +63,9 @@ public class CameraService : IDisposable
     {
         capturing = IsCapturing,
         hasCamera = _hasCamera,
-        frameCount = FrameCount,
-        droppedFrames = DroppedFrames,
-        fps = CurrentFps,
-        uptimeSeconds = Uptime.TotalSeconds,
-        width = _captureProcess != null ? 1280 : 0,
-        height = _captureProcess != null ? 720 : 0
+        width = 1280,
+        height = 720,
+        streamUrl = StreamUrl
     };
 
     private void LoadState()
@@ -175,8 +157,6 @@ public class CameraService : IDisposable
         {
         }
     }
-
-    public byte[]? GetCurrentFrame() => _latestFrame;
 
     public void SetZoom(int level)
     {
@@ -301,27 +281,6 @@ public class CameraService : IDisposable
         SaveState();
     }
 
-    public void SignalStale()
-    {
-        Console.WriteLine("[Camera] Stale frames detected. Restarting...");
-        _restartCts?.Cancel();
-        _restartCts = new CancellationTokenSource();
-        var token = _restartCts.Token;
-        Task.Run(async () =>
-        {
-            await Task.Delay(100, token);
-            if (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_captureProcess != null && !_captureProcess.HasExited)
-                        _captureProcess.Kill(true);
-                }
-                catch { }
-            }
-        });
-    }
-
     private void RestartCapture()
     {
         if (!IsCapturing)
@@ -376,11 +335,6 @@ public class CameraService : IDisposable
             return;
 
         _captureCts = new CancellationTokenSource();
-        _frameCount = 0;
-        _droppedFrames = 0;
-        _captureStartTime = DateTime.UtcNow;
-        _lastFpsTime = DateTime.UtcNow;
-        _lastFpsSample = 0;
 
         Task.Run(() =>
             CaptureLoop(width, height, framerate, _captureCts.Token));
@@ -390,19 +344,19 @@ public class CameraService : IDisposable
     {
         _captureCts?.Cancel();
 
-        try
+        foreach (var proc in new[] { _captureProcess, _ffmpegProcess })
         {
-            if (_captureProcess != null &&
-                !_captureProcess.HasExited)
+            try
             {
-                _captureProcess.Kill(true);
+                if (proc != null && !proc.HasExited)
+                    proc.Kill(true);
             }
-        }
-        catch
-        {
+            catch { }
+            proc?.Dispose();
         }
 
         _captureProcess = null;
+        _ffmpegProcess = null;
         _captureCts = null;
     }
 
@@ -413,16 +367,15 @@ public class CameraService : IDisposable
     {
         var args = new List<string>
         {
-            "--codec", "mjpeg",
+            "--codec", "h264",
             "--output", "-",
-            "--inline",
             "--nopreview",
             "--width", width.ToString(),
             "--height", height.ToString(),
             "--framerate", framerate.ToString(),
-            "--quality", _quality.ToString(),
             "--timeout", "0",
-            "--buffer-count", "1"
+            "--intra", "30",
+            "--bitrate", "2000000"
         };
 
         if (_zoom > 1)
@@ -490,128 +443,90 @@ public class CameraService : IDisposable
         return args.ToArray();
     }
 
+    private static readonly string FfmpegArgs = "-i pipe: -c copy -f rtsp -listen 1 rtsp://0.0.0.0:8554/cam";
+
     private async Task CaptureLoop(
         int width,
         int height,
         int framerate,
         CancellationToken token)
     {
-        var staleWatch = Stopwatch.StartNew();
-        var statsLogTimer = Stopwatch.StartNew();
-
         while (!token.IsCancellationRequested)
         {
             try
             {
-                var args = BuildRpicamVidArgs(
-                    width,
-                    height,
-                    framerate);
+                var args = BuildRpicamVidArgs(width, height, framerate);
+                Console.WriteLine($"[PIPELINE] rpicam-vid {string.Join(" ", args)}");
 
-                Console.WriteLine($"[RPICAM] rpicam-vid {string.Join(" ", args)}");
-
-                var psi = new ProcessStartInfo
+                var rpicamPsi = new ProcessStartInfo
                 {
                     FileName = "rpicam-vid",
                     Arguments = string.Join(" ", args),
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    StandardOutputEncoding = null,
                     CreateNoWindow = true
                 };
+                rpicamPsi.Environment["LIBCAMERA_LOG_LEVELS"] = "ERROR";
 
-                psi.Environment["LIBCAMERA_LOG_LEVELS"] = "ERROR";
-
-                var process = Process.Start(psi);
-
-                if (process == null)
+                var rpicam = Process.Start(rpicamPsi);
+                if (rpicam == null)
                 {
-                    staleWatch.Restart();
                     await Task.Delay(2000, token);
                     continue;
                 }
 
-                _captureProcess = process;
-                staleWatch.Restart();
-
-                process.ErrorDataReceived += (_, e) =>
+                var ffmpegPsi = new ProcessStartInfo
                 {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                    {
-                        Console.WriteLine($"rpicam: {e.Data}");
-                    }
+                    FileName = "ffmpeg",
+                    Arguments = FfmpegArgs,
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
                 };
 
-                process.BeginErrorReadLine();
-
-                var reader =
-                    new BinaryReader(
-                        process.StandardOutput.BaseStream);
-
-                try
+                var ffmpeg = Process.Start(ffmpegPsi);
+                if (ffmpeg == null)
                 {
-                    while (!token.IsCancellationRequested &&
-                           !process.HasExited)
-                    {
-                        if (staleWatch.ElapsedMilliseconds > 5000)
-                        {
-                            Console.WriteLine("[Camera] No frames for 5s, restarting...");
-                            break;
-                        }
-
-                        if (!process.StandardOutput.BaseStream.CanRead)
-                            break;
-
-                        var frame = ReadOneFrame(reader);
-
-                        if (frame != null)
-                        {
-                            staleWatch.Restart();
-
-                            _latestFrame = frame;
-
-                            try { _frameSignal.Release(); } catch (SemaphoreFullException) { }
-
-                            Interlocked.Increment(ref _frameCount);
-
-                            var now = DateTime.UtcNow;
-                            if ((now - _lastFpsTime).TotalSeconds >= 1)
-                            {
-                                var current = Interlocked.Read(ref _frameCount);
-                                _fps = (int)(current - _lastFpsSample);
-                                _lastFpsSample = (int)current;
-                                _lastFpsTime = now;
-                                staleWatch.Restart();
-                            }
-
-                            if (statsLogTimer.Elapsed.TotalSeconds >= 60)
-                            {
-                                Console.WriteLine($"[Stats] FPS={_fps}, Total={FrameCount}, Dropped={DroppedFrames}, Uptime={Uptime:hh\\:mm\\:ss}");
-                                statsLogTimer.Restart();
-                            }
-                        }
-                        else
-                        {
-                            Interlocked.Increment(ref _droppedFrames);
-                        }
-                    }
+                    try { rpicam.Kill(true); } catch { }
+                    rpicam.Dispose();
+                    await Task.Delay(2000, token);
+                    continue;
                 }
-                finally
+
+                _captureProcess = rpicam;
+                _ffmpegProcess = ffmpeg;
+
+                rpicam.ErrorDataReceived += (_, e) =>
                 {
-                    reader.Dispose();
+                    if (!string.IsNullOrWhiteSpace(e.Data))
+                        Console.WriteLine($"rpicam: {e.Data}");
+                };
+                rpicam.BeginErrorReadLine();
 
-                    try
-                    {
-                        if (!process.HasExited)
-                            process.Kill(true);
-                    }
-                    catch
-                    {
-                    }
+                ffmpeg.ErrorDataReceived += (_, e) =>
+                {
+                    if (!string.IsNullOrWhiteSpace(e.Data))
+                        Console.WriteLine($"ffmpeg: {e.Data}");
+                };
+                ffmpeg.BeginErrorReadLine();
 
-                    process.Dispose();
-                }
+                var pipeTask = rpicam.StandardOutput.BaseStream.CopyToAsync(ffmpeg.StandardInput.BaseStream);
+
+                await Task.WhenAny(rpicam.WaitForExitAsync(token), ffmpeg.WaitForExitAsync(token));
+
+                Console.WriteLine("[PIPELINE] Process exited, restarting...");
+
+                try { if (!rpicam.HasExited) rpicam.Kill(true); } catch { }
+                try { if (!ffmpeg.HasExited) ffmpeg.Kill(true); } catch { }
+                rpicam.Dispose();
+                ffmpeg.Dispose();
+                _captureProcess = null;
+                _ffmpegProcess = null;
+
+                if (!token.IsCancellationRequested)
+                    await Task.Delay(1000, token);
             }
             catch (OperationCanceledException)
             {
@@ -619,101 +534,9 @@ public class CameraService : IDisposable
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Camera error: {ex.Message}");
-
-                staleWatch.Restart();
+                Console.WriteLine($"Pipeline error: {ex.Message}");
                 await Task.Delay(2000, token);
             }
-        }
-    }
-
-    private byte[]? ReadOneFrame(BinaryReader reader)
-    {
-        try
-        {
-            var stream = reader.BaseStream;
-            byte[] buf = new byte[65536];
-            int prev = 0;
-            int bufLen = 0;
-
-            if (_frameTail != null && _frameTailLen > 0)
-            {
-                Array.Copy(_frameTail, 0, buf, 0, _frameTailLen);
-                bufLen = _frameTailLen;
-                _frameTail = null;
-                _frameTailLen = 0;
-            }
-
-            int read = stream.Read(buf, bufLen, buf.Length - bufLen);
-            if (read == 0) return null;
-            bufLen += read;
-
-            while (true)
-            {
-                for (int i = 0; i < bufLen; i++)
-                {
-                    if (prev != 0xFF || buf[i] != 0xD8)
-                    {
-                        prev = buf[i];
-                        continue;
-                    }
-
-                    using var ms = new MemoryStream(262144);
-                    ms.WriteByte(0xFF);
-                    ms.WriteByte(0xD8);
-
-                    int afterSoi = bufLen - i - 1;
-                    if (afterSoi > 0)
-                        ms.Write(buf, i + 1, afterSoi);
-
-                    prev = 0;
-                    while (ms.Length < 1048576)
-                    {
-                        int br = stream.Read(buf, 0, buf.Length);
-                        if (br == 0) return null;
-
-                        int eoiPos = -1;
-                        for (int j = 0; j < br; j++)
-                        {
-                            if (prev == 0xFF && buf[j] == 0xD9)
-                            {
-                                eoiPos = j + 1;
-                                break;
-                            }
-                            prev = buf[j];
-                        }
-
-                        if (eoiPos >= 0)
-                        {
-                            ms.Write(buf, 0, eoiPos);
-
-                            int tail = br - eoiPos;
-                            if (tail > 0)
-                            {
-                                if (_frameTailBuffer == null || _frameTailBuffer.Length < tail)
-                                    _frameTailBuffer = new byte[Math.Max(tail, 4096)];
-                                Array.Copy(buf, eoiPos, _frameTailBuffer, 0, tail);
-                                _frameTail = _frameTailBuffer;
-                                _frameTailLen = tail;
-                            }
-
-                            return ms.ToArray();
-                        }
-
-                        ms.Write(buf, 0, br);
-                    }
-                    return null;
-                }
-
-                read = stream.Read(buf, 0, buf.Length);
-                if (read == 0) return null;
-                bufLen = read;
-                prev = 0;
-            }
-        }
-        catch
-        {
-            return null;
         }
     }
 
@@ -722,4 +545,5 @@ public class CameraService : IDisposable
         _restartCts?.Cancel();
         StopCapture();
     }
+
 }

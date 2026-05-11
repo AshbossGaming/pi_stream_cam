@@ -195,12 +195,9 @@
 <body>
     <h2>PTZ Camera Control</h2>
     
-    <div class="toolbar">
-        <span id="fpsDisplay" class="badge">- fps</span>
-    </div>
-
-    <div class="stream-container">
-        <img id="streamFrame" src="">
+    <div class="stream-url">
+        <label>RTSP Stream URL (add as Media Source in OBS)</label>
+        <input type="text" id="rtspUrl" value="rtsp://picam1:8554/cam" readonly onclick="this.select()">
     </div>
     
     <div class="dpad">
@@ -320,13 +317,6 @@
         let presets = [];
         
         const wbModes = ['Auto', 'Incandescent', 'Tungsten', 'Fluorescent', 'Indoor', 'Daylight', 'Cloudy', 'Cool White', 'Flash'];
-        const streamPort = 5001;
-
-        function updateCamUrl() {
-            const streamPath = `${location.protocol}//${location.hostname}:${streamPort}/api/stream/mjpeg`;
-            document.getElementById('streamFrame').src = streamPath;
-            fetchStatus();
-        }
         
         function updateStatus(msg, type = '') {
             const el = document.getElementById('status');
@@ -694,16 +684,6 @@
             }
         }
         
-        let currentFps = 0;
-
-        async function fetchSystemStatus() {
-            const result = await apiCall('/api/status');
-            if (result && result.camera) {
-                currentFps = result.camera.fps || 0;
-                document.getElementById('fpsDisplay').textContent = currentFps + ' fps';
-            }
-        }
-
         let pendingPowerAction = null;
 
         function powerAction(action) {
@@ -750,12 +730,16 @@
             if (e.key === 'Enter') confirmPowerAction();
         });
 
-        document.getElementById('streamFrame').addEventListener('load', function() {
-        });
+        async function updateStreamUrl() {
+            const result = await apiCall('/api/stream/info');
+            if (result && result.url) {
+                document.getElementById('rtspUrl').value = result.url;
+            }
+        }
 
-        updateCamUrl();
+        fetchStatus();
+        updateStreamUrl();
         setInterval(fetchStatus, 2000);
-        setInterval(fetchSystemStatus, 5000);
     </script>
 </body>
 </html>
