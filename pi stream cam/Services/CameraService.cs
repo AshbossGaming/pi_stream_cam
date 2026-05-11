@@ -48,7 +48,7 @@ public class CameraService : IDisposable
     private Process? _captureProcess;
     private Process? _ffmpegProcess;
 
-    public string StreamUrl => $"tcp://picam1:5004";
+    public string StreamUrl => $"udp://picam1:5004";
 
     public CameraService()
     {
@@ -443,7 +443,7 @@ public class CameraService : IDisposable
         return args.ToArray();
     }
 
-    private static readonly string FfmpegArgs = "-i pipe: -c copy -f mpegts tcp://0.0.0.0:5004?listen=1";
+    private static readonly string FfmpegArgs = "-i pipe: -c copy -f mpegts udp://0.0.0.0:5004";
 
     private async Task CaptureLoop(
         int width,

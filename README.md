@@ -148,23 +148,23 @@ sudo systemctl daemon-reload
 
 ## Adding Stream to OBS
 
-The Pi serves H.264 video as MPEG-TS over TCP on port `5004`:
+The Pi serves H.264 video as MPEG-TS over UDP on port `5004`:
 
 ```
-tcp://<pi-ip>:5004
+udp://<pi-ip>:5004
 ```
+
+In OBS, use `udp://@:5004` as the Media Source URL.
 
 ### Add as Media Source
 1. Open OBS Studio.
 2. In the **Sources** dock, click **+** and select **Media Source**.
 3. Name it (e.g., "Pi Cam").
 4. Uncheck **Local File**.
-5. In **Input**, paste `tcp://<pi-ip>:5004`.
+5. In **Input**, paste `udp://@:5004`.
 6. Set **Network Caching** to `100ms` (lower latency).
 7. Set **Close file when inactive** to `No`.
 8. Click **OK**.
-
-If TCP doesn't work with your OBS build, use UDP instead: `udp://@:5004` (less reliable, but may have wider compatibility).
 
 ### Streaming to YouTube from OBS
 Once the source is in OBS:
