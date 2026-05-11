@@ -148,10 +148,10 @@ sudo systemctl daemon-reload
 
 ## Adding Stream to OBS
 
-The Pi serves H.264 video via RTSP on port `8554`:
+The Pi serves H.264 video as MPEG-TS over TCP on port `5004`:
 
 ```
-rtsp://<pi-ip>:8554/cam
+tcp://<pi-ip>:5004
 ```
 
 ### Add as Media Source
@@ -159,13 +159,15 @@ rtsp://<pi-ip>:8554/cam
 2. In the **Sources** dock, click **+** and select **Media Source**.
 3. Name it (e.g., "Pi Cam").
 4. Uncheck **Local File**.
-5. In **Input**, paste `rtsp://<pi-ip>:8554/cam`.
+5. In **Input**, paste `tcp://<pi-ip>:5004`.
 6. Set **Network Caching** to `100ms` (lower latency).
 7. Set **Close file when inactive** to `No`.
 8. Click **OK**.
 
+If TCP doesn't work with your OBS build, use UDP instead: `udp://@:5004` (less reliable, but may have wider compatibility).
+
 ### Streaming to YouTube from OBS
-Once the RTSP source is in OBS:
+Once the source is in OBS:
 1. Go to **Settings > Stream**.
 2. Select **YouTube - RTMPS**.
 3. Paste your YouTube stream key.
@@ -206,6 +208,6 @@ The .NET app spawns and manages both processes, restarting the pipeline on camer
 
 - **Camera not found**: Ensure camera is enabled in `raspi-config`
 - **Servos not moving**: Check I2C is enabled and PCA9685 is wired correctly
-- **RTSP not connecting**: Check `ffmpeg` is installed (`which ffmpeg`), verify port 8554 is open, check service logs
+- **Stream not connecting**: Check `ffmpeg` is installed (`which ffmpeg`), verify port 5004 is open, check service logs
 - **Shutdown/reboot not working**: Check `/usr/local/bin/pi-cam-power` exists and has setuid (`ls -l /usr/local/bin/pi-cam-power` should show `-rwsr-xr-x root root`)
 - **Check logs**: `sudo journalctl -u pi-stream-cam -f`

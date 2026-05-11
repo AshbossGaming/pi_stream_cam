@@ -196,8 +196,8 @@
     <h2>PTZ Camera Control</h2>
     
     <div class="stream-url">
-        <label>RTSP Stream URL (add as Media Source in OBS)</label>
-        <input type="text" id="rtspUrl" value="rtsp://picam1:8554/cam" readonly onclick="this.select()">
+        <label>Stream URL (add as Media Source in OBS)</label>
+        <input type="text" id="streamUrl" value="tcp://picam1:5004" readonly onclick="this.select()">
     </div>
     
     <div class="dpad">
@@ -733,7 +733,7 @@
         async function updateStreamUrl() {
             const result = await apiCall('/api/stream/info');
             if (result && result.url) {
-                document.getElementById('rtspUrl').value = result.url;
+                document.getElementById('streamUrl').value = result.url;
             }
         }
 
