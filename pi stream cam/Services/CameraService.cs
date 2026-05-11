@@ -9,9 +9,8 @@ namespace pi_stream_cam.Services;
 public class CameraService : IDisposable
 {
     private readonly bool _hasCamera;
-    private readonly object _lock = new();
     private readonly SemaphoreSlim _frameSignal = new(0, 1);
-    private byte[]? _latestFrame;
+    private volatile byte[]? _latestFrame;
     private CancellationTokenSource? _captureCts;
     private CancellationTokenSource? _restartCts;
 
@@ -52,6 +51,7 @@ public class CameraService : IDisposable
     private Process? _captureProcess;
     private byte[]? _frameTail;
     private int _frameTailLen;
+    private byte[]? _frameTailBuffer;
 
     private long _frameCount;
     private long _droppedFrames;
@@ -74,23 +74,17 @@ public class CameraService : IDisposable
         LoadState();
     }
 
-    public object GetStats()
+    public object GetStats() => new
     {
-        lock (_lock)
-        {
-            return new
-            {
-                capturing = IsCapturing,
-                hasCamera = _hasCamera,
-                frameCount = FrameCount,
-                droppedFrames = DroppedFrames,
-                fps = CurrentFps,
-                uptimeSeconds = Uptime.TotalSeconds,
-                width = _captureProcess != null ? 1280 : 0,
-                height = _captureProcess != null ? 720 : 0
-            };
-        }
-    }
+        capturing = IsCapturing,
+        hasCamera = _hasCamera,
+        frameCount = FrameCount,
+        droppedFrames = DroppedFrames,
+        fps = CurrentFps,
+        uptimeSeconds = Uptime.TotalSeconds,
+        width = _captureProcess != null ? 1280 : 0,
+        height = _captureProcess != null ? 720 : 0
+    };
 
     private void LoadState()
     {
@@ -182,13 +176,7 @@ public class CameraService : IDisposable
         }
     }
 
-    public byte[]? GetCurrentFrame()
-    {
-        lock (_lock)
-        {
-            return _latestFrame;
-        }
-    }
+    public byte[]? GetCurrentFrame() => _latestFrame;
 
     public void SetZoom(int level)
     {
@@ -581,10 +569,7 @@ public class CameraService : IDisposable
                         {
                             staleWatch.Restart();
 
-                            lock (_lock)
-                            {
-                                _latestFrame = frame;
-                            }
+                            _latestFrame = frame;
 
                             try { _frameSignal.Release(); } catch (SemaphoreFullException) { }
 
@@ -651,7 +636,6 @@ public class CameraService : IDisposable
             int prev = 0;
             int bufLen = 0;
 
-            // Prepend any tail bytes saved from the previous call
             if (_frameTail != null && _frameTailLen > 0)
             {
                 Array.Copy(_frameTail, 0, buf, 0, _frameTailLen);
@@ -660,16 +644,20 @@ public class CameraService : IDisposable
                 _frameTailLen = 0;
             }
 
-            // Fill the rest of the buffer from the pipe
             int read = stream.Read(buf, bufLen, buf.Length - bufLen);
             if (read == 0) return null;
             bufLen += read;
 
-            // Scan for SOI marker (0xFF 0xD8)
-            for (int i = 0; i < bufLen; i++)
+            while (true)
             {
-                if (prev == 0xFF && buf[i] == 0xD8)
+                for (int i = 0; i < bufLen; i++)
                 {
+                    if (prev != 0xFF || buf[i] != 0xD8)
+                    {
+                        prev = buf[i];
+                        continue;
+                    }
+
                     using var ms = new MemoryStream(262144);
                     ms.WriteByte(0xFF);
                     ms.WriteByte(0xD8);
@@ -678,7 +666,6 @@ public class CameraService : IDisposable
                     if (afterSoi > 0)
                         ms.Write(buf, i + 1, afterSoi);
 
-                    // Continue reading and scanning for EOI (0xFF 0xD9)
                     prev = 0;
                     while (ms.Length < 1048576)
                     {
@@ -700,12 +687,13 @@ public class CameraService : IDisposable
                         {
                             ms.Write(buf, 0, eoiPos);
 
-                            // Save any bytes after EOI for the next frame
                             int tail = br - eoiPos;
                             if (tail > 0)
                             {
-                                _frameTail = new byte[buf.Length];
-                                Array.Copy(buf, eoiPos, _frameTail, 0, tail);
+                                if (_frameTailBuffer == null || _frameTailBuffer.Length < tail)
+                                    _frameTailBuffer = new byte[Math.Max(tail, 4096)];
+                                Array.Copy(buf, eoiPos, _frameTailBuffer, 0, tail);
+                                _frameTail = _frameTailBuffer;
                                 _frameTailLen = tail;
                             }
 
@@ -716,11 +704,12 @@ public class CameraService : IDisposable
                     }
                     return null;
                 }
-                prev = buf[i];
-            }
 
-            // SOI not found in this batch — try again
-            return ReadOneFrame(reader);
+                read = stream.Read(buf, 0, buf.Length);
+                if (read == 0) return null;
+                bufLen = read;
+                prev = 0;
+            }
         }
         catch
         {

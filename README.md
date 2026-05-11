@@ -61,12 +61,12 @@ Then reboot: `sudo reboot`
 ### 4. Access the Camera
 
 After reboot, navigate to:
-- **Cam 1 interface**: `http://192.168.100.203:5000/`
-- **Cam 2 interface**: `http://192.168.100.204:5000/`
-- **Mobile view**: `/mobile` (on either cam)
-- **Dock view**: `/dock` (on either cam)
+- **Control interface**: `http://<pi-ip>:5000/`
+- **Stream endpoint**: `http://<pi-ip>:5001/api/stream/mjpeg`
+- **Dock view**: `/dock` (full control UI, requires login)
+- **Mobile view**: `/mobile` (redirects to dock)
 
-Default password: `admin` (change in `appsettings.json`)
+Default password: `admin` (change via `Password` config or env var)
 
 ## API Endpoints
 
@@ -90,23 +90,35 @@ Default password: `admin` (change in `appsettings.json`)
 - `POST /api/ptz/saturation/{value}` - Saturation (0, 1, 2)
 
 ### Stream
-- `GET /api/stream/mjpeg` - MJPEG stream
-- `GET /api/stream/snapshot` - Single JPEG snapshot
+- `GET /api/stream/mjpeg` - MJPEG stream (hardware-accelerated via rpicam-vid)
+
+### System
+- `POST /api/system/shutdown` - Shutdown the Pi (body: `{"password": "..."}`)
+- `POST /api/system/reboot` - Reboot the Pi (body: `{"password": "..."}`)
+
+### Bulk Settings
+- `POST /api/option` - Set multiple options at once (body: `{"zoom": 2, "brightness": 0, ...}`)
 
 ## Configuration
 
-Edit `appsettings.json` before publishing:
+Set via environment variables or `appsettings.json`:
 
 ```json
 {
   "Password": "admin",
-  "Logging": { ... }
+  "CONTROL_PORT": 5000,
+  "STREAM_PORT": 5001
 }
+```
+
+Default password: `admin`. For production, set via environment:
+```
+Environment=Password=your-secure-password
 ```
 
 ## Static IP
 
-The cameras are configured with static IPs `192.168.100.203` (Cam 1) and `192.168.100.204` (Cam 2). To set this up on a Pi:
+To configure a static IP on the Pi:
 
 ```bash
 sudo bash scripts/setup-static-ip.sh
@@ -128,18 +140,22 @@ sudo journalctl -u pi-stream-cam -f    # View logs
 To remove the application and service from your Pi:
 
 ```bash
-cd ~/publish
-sudo bash scripts/undeploy.sh
+sudo systemctl stop pi-stream-cam
+sudo systemctl disable pi-stream-cam
+sudo rm -f /etc/systemd/system/pi-stream-cam.service
+sudo rm -rf /opt/pi-stream-cam
+sudo systemctl daemon-reload
 ```
 
 ## Adding Stream to OBS
 
 ### 1. Identify your Stream URL
-Based on the configuration, the MJPEG stream is served at:
-- **Cam 1:** `http://192.168.100.203:5000/api/stream/mjpeg`
-- **Cam 2:** `http://192.168.100.204:5000/api/stream/mjpeg`
+The MJPEG stream is served on the stream port (default `5001`):
+```
+http://<pi-ip>:5001/api/stream/mjpeg
+```
 
-*Note: Replace the IP address with your Raspberry Pi's actual IP if it differs.*
+*Note: Replace with your Raspberry Pi's actual IP.*
 
 ### 2. Add as a Browser Source (Recommended)
 1. Open OBS Studio.
@@ -156,9 +172,23 @@ Based on the configuration, the MJPEG stream is served at:
 4. Set **Input Format** to `mjpeg`.
 5. Click **OK**.
 
+## System Power Control
+
+The dock UI includes **Shutdown** and **Reboot** buttons. These require re-entering the admin password for safety.
+
+On the Pi, the service runs as a `DynamicUser` without sudo privileges, so a setuid helper binary (`/usr/local/bin/pi-cam-power`) is used to execute `systemctl poweroff` / `systemctl reboot` as root. The deploy script compiles and installs this helper automatically.
+
+## Deploy Architecture
+
+- **publish.sh** builds a self-contained linux-arm64 .NET app
+- **deploy.sh** installs dependencies, copies the release to `/opt/pi-stream-cam/releases/<timestamp>/`, compiles the setuid power helper, installs/restarts the systemd service
+- The last 3 releases are kept; older ones are pruned
+- The systemd unit uses `DynamicUser`, cgroups (384M max), and `Nice=10` for minimal interference
+
 ## Troubleshooting
 
 - **Camera not found**: Ensure camera is enabled in `raspi-config`
 - **Servos not moving**: Check I2C is enabled and PCA9685 is wired correctly
 - **Can't access from browser**: Check firewall, ensure service is running
+- **Shutdown/reboot not working**: Check `/usr/local/bin/pi-cam-power` exists and has setuid (`ls -l /usr/local/bin/pi-cam-power` should show `-rwsr-xr-x root root`)
 - **Check logs**: `sudo journalctl -u pi-stream-cam -f`

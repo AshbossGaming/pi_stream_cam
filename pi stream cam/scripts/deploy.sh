@@ -15,10 +15,11 @@ RECORDINGS_DIR="/var/lib/pi-stream-cam/recordings"
 echo "Setting up Pi Stream Cam service..."
 echo "Release ID: $RELEASE_ID"
 
-echo "Installing libcamera dependencies..."
+echo "Installing dependencies..."
 sudo apt-get update -qq
 sudo apt-get install -y -qq \
-    libcamera-apps
+    libcamera-apps \
+    build-essential
 
 echo "Creating directory structure..."
 sudo mkdir -p "$RELEASE_DIR"
@@ -28,6 +29,16 @@ sudo mkdir -p /var/log/pi-stream-cam
 echo "Copying release to $RELEASE_DIR..."
 tar -cf - . | sudo tar -xf - -C "$RELEASE_DIR"
 sudo chmod +x "$RELEASE_DIR/pi-stream-cam"
+
+echo "Compiling system power helper..."
+if [ -f "$RELEASE_DIR/scripts/pi-cam-power.c" ]; then
+    gcc -Os -s -o /tmp/pi-cam-power "$RELEASE_DIR/scripts/pi-cam-power.c"
+    sudo cp /tmp/pi-cam-power /usr/local/bin/pi-cam-power
+    sudo chown root:root /usr/local/bin/pi-cam-power
+    sudo chmod u+s /usr/local/bin/pi-cam-power
+    rm -f /tmp/pi-cam-power
+    echo "Installed setuid power helper at /usr/local/bin/pi-cam-power"
+fi
 
 # Copy VERSION file if present
 if [ -f VERSION ]; then

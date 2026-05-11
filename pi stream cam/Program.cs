@@ -1,4 +1,5 @@
-﻿using pi_stream_cam.Services;
+﻿using System.Diagnostics;
+using pi_stream_cam.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -257,12 +258,10 @@ app.MapGet("/api/status", () =>
         endpoints = new
         {
             mjpeg = new { url = $"http://picam1:{streamPort}/api/stream/mjpeg", type = "multipart/x-mixed-replace" },
-            snapshot = new { url = $"http://picam1:{controlPort}/api/stream/snapshot", type = "image/jpeg" },
-            snapshotHighRes = new { url = $"http://picam1:{controlPort}/api/stream/snapshot/highres", type = "image/jpeg" },
             status = new { url = $"http://picam1:{controlPort}/api/status", type = "application/json" },
             ptzStatus = new { url = $"http://picam1:{controlPort}/api/ptz/status", type = "application/json" },
-            recordStart = new { url = $"http://picam1:{controlPort}/api/stream/record/start", method = "POST" },
-            recordStop = new { url = $"http://picam1:{controlPort}/api/stream/record/stop", method = "POST" }
+            ptzMove = new { url = $"http://picam1:{controlPort}/api/ptz/move", method = "POST" },
+            ptzCenter = new { url = $"http://picam1:{controlPort}/api/ptz/center", method = "POST" }
         },
 
         system = new
@@ -286,9 +285,93 @@ app.MapGet("/", () => Results.Ok(new
     ptzCenter = "POST /api/ptz/center",
     camera = "Arducam 16MP IMX519",
     servos = "MG90S x2 via PCA9685",
-    recording = "POST /api/stream/record/start",
-    snapshot = "/api/stream/snapshot",
     version = VersionInfo.Version
 })).AllowAnonymous();
 
+app.MapPost("/api/system/shutdown", async context =>
+{
+    var password = await GetPasswordFromBody(context);
+    var validPassword = context.RequestServices.GetRequiredService<IConfiguration>()["Password"] ?? "admin";
+    if (password != validPassword)
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsJsonAsync(new { error = "Invalid password" });
+        return;
+    }
+
+    _ = SystemShutdown(context.RequestServices);
+    await context.Response.WriteAsJsonAsync(new { message = "Shutdown initiated" });
+}).RequireAuthorization();
+
+app.MapPost("/api/system/reboot", async context =>
+{
+    var password = await GetPasswordFromBody(context);
+    var validPassword = context.RequestServices.GetRequiredService<IConfiguration>()["Password"] ?? "admin";
+    if (password != validPassword)
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsJsonAsync(new { error = "Invalid password" });
+        return;
+    }
+
+    _ = SystemReboot(context.RequestServices);
+    await context.Response.WriteAsJsonAsync(new { message = "Reboot initiated" });
+}).RequireAuthorization();
+
 app.Run();
+
+static async Task<string> GetPasswordFromBody(HttpContext context)
+{
+    using var reader = new StreamReader(context.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    return doc.RootElement.TryGetProperty("password", out var pwd) ? pwd.GetString() ?? "" : "";
+}
+
+static async Task SystemShutdown(IServiceProvider services)
+{
+    try
+    {
+        var helper = "/usr/local/bin/pi-cam-power";
+        if (File.Exists(helper))
+        {
+            await Process.Start(helper, "shutdown").WaitForExitAsync();
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            await Process.Start("systemctl", "poweroff").WaitForExitAsync();
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            await Process.Start("shutdown", "/s /t 3").WaitForExitAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Shutdown failed: {ex.Message}");
+    }
+}
+
+static async Task SystemReboot(IServiceProvider services)
+{
+    try
+    {
+        var helper = "/usr/local/bin/pi-cam-power";
+        if (File.Exists(helper))
+        {
+            await Process.Start(helper, "reboot").WaitForExitAsync();
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            await Process.Start("systemctl", "reboot").WaitForExitAsync();
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            await Process.Start("shutdown", "/r /t 3").WaitForExitAsync();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Reboot failed: {ex.Message}");
+    }
+}

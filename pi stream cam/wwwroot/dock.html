@@ -131,6 +131,65 @@
         .btn.btn-sm:hover { background: #444; }
         .btn.btn-sm.recording { color: #f44; border-color: #f44; background: #422; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            background: #2a2a2a;
+            padding: 24px;
+            border-radius: 8px;
+            width: 320px;
+            border: 1px solid #555;
+        }
+        .modal-box h3 {
+            font-size: 14px;
+            color: #f88;
+            margin-bottom: 12px;
+        }
+        .modal-box p {
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        .modal-box .field {
+            margin-bottom: 12px;
+        }
+        .modal-box .field label {
+            display: block;
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .modal-box .field input {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .modal-box .field input:focus { outline: none; border-color: #666; }
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .modal-actions .btn { flex: 1; padding: 10px; font-size: 13px; }
+        .modal-actions .btn.danger { background: #622; border-color: #c44; }
+        .modal-actions .btn.danger:hover { background: #833; }
+        .btn.system {
+            background: #3a1a1a;
+            border-color: #844;
+        }
+        .btn.system:hover { background: #4a2a2a; }
     </style>
 </head>
 <body>
@@ -223,8 +282,28 @@
         <button class="btn preset-btn" id="preset3" onclick="presetAction(3)" ondblclick="presetSet(3)" oncontextmenu="event.preventDefault(); presetClear(3);">Preset 4</button>
         <button class="btn full danger" onclick="center()">Center</button>
     </div>
+
+    <div class="controls">
+        <button class="btn system" onclick="powerAction('shutdown')">Shutdown</button>
+        <button class="btn system" onclick="powerAction('reboot')">Reboot</button>
+    </div>
     
     <div class="status" id="status">Ready</div>
+    
+    <div class="modal-overlay" id="powerModal">
+        <div class="modal-box">
+            <h3 id="powerModalTitle">Confirm</h3>
+            <p id="powerModalMsg">Are you sure?</p>
+            <div class="field">
+                <label>Password</label>
+                <input type="password" id="powerPassword" placeholder="Enter admin password">
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="closePowerModal()">Cancel</button>
+                <button class="btn danger" id="powerConfirmBtn" onclick="confirmPowerAction()">Confirm</button>
+            </div>
+        </div>
+    </div>
     
     <script>
         let currentPan = 90, currentTilt = 45, currentZoom = 1, currentFocus = 50;
@@ -624,6 +703,52 @@
                 document.getElementById('fpsDisplay').textContent = currentFps + ' fps';
             }
         }
+
+        let pendingPowerAction = null;
+
+        function powerAction(action) {
+            pendingPowerAction = action;
+            const title = action === 'shutdown' ? 'Shutdown System' : 'Reboot System';
+            const msg = action === 'shutdown'
+                ? 'This will shut down the Raspberry Pi. The camera stream and all controls will stop. Are you sure?'
+                : 'This will reboot the Raspberry Pi. The camera stream and controls will be temporarily unavailable. Are you sure?';
+            document.getElementById('powerModalTitle').textContent = title;
+            document.getElementById('powerModalMsg').textContent = msg;
+            document.getElementById('powerConfirmBtn').textContent = action === 'shutdown' ? 'Shutdown' : 'Reboot';
+            document.getElementById('powerPassword').value = '';
+            document.getElementById('powerPassword').focus();
+            document.getElementById('powerModal').classList.add('active');
+        }
+
+        function closePowerModal() {
+            document.getElementById('powerModal').classList.remove('active');
+            pendingPowerAction = null;
+        }
+
+        async function confirmPowerAction() {
+            const password = document.getElementById('powerPassword').value;
+            if (!password) {
+                updateStatus('Password required', 'error');
+                return;
+            }
+            const action = pendingPowerAction;
+            if (!action) return;
+
+            updateStatus(action === 'shutdown' ? 'Shutting down...' : 'Rebooting...');
+            closePowerModal();
+
+            const result = await apiCall('/api/system/' + action, {
+                method: 'POST',
+                body: JSON.stringify({ password })
+            });
+            if (result) {
+                updateStatus(result.message || (action === 'shutdown' ? 'Shutdown initiated' : 'Reboot initiated'), 'success');
+            }
+        }
+
+        document.getElementById('powerPassword').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') confirmPowerAction();
+        });
 
         document.getElementById('streamFrame').addEventListener('load', function() {
         });

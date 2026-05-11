@@ -19,6 +19,7 @@ public class ServoService : IDisposable
     private bool _hardwareInitAttempted;
 
     private List<PtzPreset> _presets = new() { null!, null!, null!, null! };
+    private CancellationTokenSource? _debounceSaveCts;
 
     public int PanAngle => _panAngle;
     public int TiltAngle => _tiltAngle;
@@ -95,6 +96,19 @@ public class ServoService : IDisposable
         {
             Console.WriteLine($"Load state error: {ex.Message}");
         }
+    }
+
+    private void DebounceSaveState()
+    {
+        _debounceSaveCts?.Cancel();
+        _debounceSaveCts = new CancellationTokenSource();
+        var token = _debounceSaveCts.Token;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500, token).ConfigureAwait(false);
+            if (!token.IsCancellationRequested)
+                SaveState();
+        });
     }
 
     public void SaveState()
@@ -174,8 +188,8 @@ public class ServoService : IDisposable
             angle = Math.Clamp(angle, 0, 180);
             _panAngle = angle;
             SetServoAngle(_panChannel, angle);
-            SaveState();
         }
+        DebounceSaveState();
         return Task.CompletedTask;
     }
 
@@ -186,8 +200,8 @@ public class ServoService : IDisposable
             angle = Math.Clamp(angle, 0, 180);
             _tiltAngle = angle;
             SetServoAngle(_tiltChannel, angle);
-            SaveState();
         }
+        DebounceSaveState();
         return Task.CompletedTask;
     }
 
@@ -198,8 +212,8 @@ public class ServoService : IDisposable
             var newTilt = _tiltAngle > 90 ? 90 : 180;
             _tiltAngle = newTilt;
             SetServoAngle(_tiltChannel, newTilt);
-            SaveState();
         }
+        DebounceSaveState();
         return Task.CompletedTask;
     }
 
@@ -247,9 +261,10 @@ public class ServoService : IDisposable
 
     public void Dispose()
     {
+        _debounceSaveCts?.Cancel();
+        SaveState();
         try
         {
-            // Center servos on shutdown
             if (_isHardwareAvailable && _pca9685 != null)
             {
                 SetServoAngle(_panChannel, 90);
