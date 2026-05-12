@@ -10,7 +10,6 @@ public class CameraService : IDisposable
 {
     private readonly bool _hasCamera;
     private CancellationTokenSource? _captureCts;
-    private CancellationTokenSource? _restartCts;
 
     private int _zoom = 1;
     private int _focus = 50;
@@ -161,9 +160,8 @@ public class CameraService : IDisposable
     public void SetZoom(int level)
     {
         _zoom = Math.Clamp(level, 1, 8);
-        Console.WriteLine($"Zoom set: {_zoom}x");
+        Console.WriteLine($"Zoom set: {_zoom}x (applies on next restart)");
         SaveState();
-        RestartCapture();
     }
 
     public void SetFocus(int value)
@@ -172,9 +170,8 @@ public class CameraService : IDisposable
         _autofocus = false;
         _afMode = "manual";
 
-        Console.WriteLine($"Focus set: {_focus}");
+        Console.WriteLine($"Focus set: {_focus} (applies on next restart)");
         SaveState();
-        RestartCapture();
     }
 
     public void EnableAutofocus(string mode = "continuous")
@@ -182,9 +179,8 @@ public class CameraService : IDisposable
         _autofocus = true;
         _afMode = mode;
 
-        Console.WriteLine($"Autofocus enabled: {_afMode}");
+        Console.WriteLine($"Autofocus enabled: {_afMode} (applies on next restart)");
         SaveState();
-        RestartCapture();
     }
 
     public void DisableAutofocus()
@@ -192,9 +188,8 @@ public class CameraService : IDisposable
         _autofocus = false;
         _afMode = "manual";
 
-        Console.WriteLine("Autofocus disabled");
+        Console.WriteLine("Autofocus disabled (applies on next restart)");
         SaveState();
-        RestartCapture();
     }
 
     public void SetAfMode(string mode)
@@ -203,18 +198,16 @@ public class CameraService : IDisposable
         {
             _autofocus = mode != "manual";
             _afMode = mode;
-            Console.WriteLine($"AF mode: {_afMode}");
+            Console.WriteLine($"AF mode: {_afMode} (applies on next restart)");
             SaveState();
-            RestartCapture();
         }
     }
 
     public void SetFocusRange(string range)
     {
         _focusRange = range;
-        Console.WriteLine($"Focus range: {_focusRange}");
+        Console.WriteLine($"Focus range: {_focusRange} (applies on next restart)");
         SaveState();
-        RestartCapture();
     }
 
     public void SetExposureCompensation(int value)
@@ -266,10 +259,9 @@ public class CameraService : IDisposable
 
         _videoFlipped = flipped;
 
-        Console.WriteLine($"Video flipped: {_videoFlipped}");
+        Console.WriteLine($"Video flipped: {_videoFlipped} (applies on next restart)");
 
         SaveState();
-        RestartCapture();
     }
 
     public void SetQuality(int quality)
@@ -279,38 +271,6 @@ public class CameraService : IDisposable
         Console.WriteLine($"JPEG Quality: {_quality}");
 
         SaveState();
-    }
-
-    private void RestartCapture()
-    {
-        if (!IsCapturing)
-            return;
-
-        _restartCts?.Cancel();
-        _restartCts = new CancellationTokenSource();
-        var token = _restartCts.Token;
-
-        Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(50, token);
-                if (!token.IsCancellationRequested)
-                {
-                    Console.WriteLine("[Camera] Restarting capture...");
-                    foreach (var proc in new[] { _captureProcess, _ffmpegProcess })
-                    {
-                        try
-                        {
-                            if (proc != null && !proc.HasExited)
-                                proc.Kill(true);
-                        }
-                        catch { }
-                    }
-                }
-            }
-            catch { }
-        });
     }
 
     public void StartCapture(
@@ -535,7 +495,6 @@ public class CameraService : IDisposable
 
     public void Dispose()
     {
-        _restartCts?.Cancel();
         StopCapture();
     }
 
