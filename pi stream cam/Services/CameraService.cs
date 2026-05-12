@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace pi_stream_cam.Services;
 
@@ -160,8 +161,9 @@ public class CameraService : IDisposable
     public void SetZoom(int level)
     {
         _zoom = Math.Clamp(level, 1, 8);
-        Console.WriteLine($"Zoom set: {_zoom}x (applies on next restart)");
+        Console.WriteLine($"Zoom set: {_zoom}x");
         SaveState();
+        KillFfmpeg();
     }
 
     public void SetFocus(int value)
@@ -259,9 +261,9 @@ public class CameraService : IDisposable
 
         _videoFlipped = flipped;
 
-        Console.WriteLine($"Video flipped: {_videoFlipped} (applies on next restart)");
-
+        Console.WriteLine($"Video flipped: {_videoFlipped}");
         SaveState();
+        KillFfmpeg();
     }
 
     public void SetQuality(int quality)
@@ -271,6 +273,16 @@ public class CameraService : IDisposable
         Console.WriteLine($"JPEG Quality: {_quality}");
 
         SaveState();
+    }
+
+    private void KillFfmpeg()
+    {
+        var old = Interlocked.Exchange(ref _ffmpegProcess, null);
+        if (old != null && !old.HasExited)
+        {
+            try { old.Kill(true); } catch { }
+        }
+        old?.Dispose();
     }
 
     public void StartCapture(
@@ -297,7 +309,10 @@ public class CameraService : IDisposable
     {
         _captureCts?.Cancel();
 
-        foreach (var proc in new[] { _captureProcess, _ffmpegProcess })
+        var rpicam = Interlocked.Exchange(ref _captureProcess, null);
+        var ffmpeg = Interlocked.Exchange(ref _ffmpegProcess, null);
+
+        foreach (var proc in new[] { rpicam, ffmpeg })
         {
             try
             {
@@ -308,8 +323,6 @@ public class CameraService : IDisposable
             proc?.Dispose();
         }
 
-        _captureProcess = null;
-        _ffmpegProcess = null;
         _captureCts = null;
     }
 
@@ -330,14 +343,6 @@ public class CameraService : IDisposable
             "--intra", "30",
             "--bitrate", "2000000"
         };
-
-        if (_zoom > 1)
-        {
-            double size = 1.0 / _zoom;
-            double offset = (1.0 - size) / 2.0;
-            args.Add("--roi");
-            args.Add($"{offset:F4},{offset:F4},{size:F4},{size:F4}");
-        }
 
         args.Add("--autofocus-mode");
         args.Add(_afMode);
@@ -390,13 +395,34 @@ public class CameraService : IDisposable
             args.Add(_saturation.ToString(CultureInfo.InvariantCulture));
         }
 
-        if (_videoFlipped)
-            args.Add("--vflip");
-
         return args.ToArray();
     }
 
-    private static readonly string FfmpegArgs = "-i pipe: -c copy -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
+    private string BuildFfmpegArgs()
+    {
+        var filters = new List<string>();
+
+        if (_zoom > 1)
+        {
+            var size = 1.0 / _zoom;
+            var cropW = (int)(1280 * size) & ~1;
+            var cropH = (int)(720 * size) & ~1;
+            var cropX = (int)((1280 - cropW) / 2.0) & ~1;
+            var cropY = (int)((720 - cropH) / 2.0) & ~1;
+            filters.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale=1280:720");
+        }
+
+        if (_videoFlipped)
+            filters.Add("hflip,vflip");
+
+        if (filters.Count > 0)
+        {
+            var vf = string.Join(",", filters);
+            return $"-i pipe: -vf {vf} -c:v h264_v4l2m2m -b:v 2000k -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
+        }
+
+        return "-i pipe: -c copy -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
+    }
 
     private async Task CaptureLoop(
         int width,
@@ -429,27 +455,7 @@ public class CameraService : IDisposable
                     continue;
                 }
 
-                var ffmpegPsi = new ProcessStartInfo
-                {
-                    FileName = "ffmpeg",
-                    Arguments = FfmpegArgs,
-                    UseShellExecute = false,
-                    RedirectStandardInput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                var ffmpeg = Process.Start(ffmpegPsi);
-                if (ffmpeg == null)
-                {
-                    try { rpicam.Kill(true); } catch { }
-                    rpicam.Dispose();
-                    await Task.Delay(2000, token);
-                    continue;
-                }
-
                 _captureProcess = rpicam;
-                _ffmpegProcess = ffmpeg;
 
                 rpicam.ErrorDataReceived += (_, e) =>
                 {
@@ -458,25 +464,14 @@ public class CameraService : IDisposable
                 };
                 rpicam.BeginErrorReadLine();
 
-                ffmpeg.ErrorDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Console.WriteLine($"ffmpeg: {e.Data}");
-                };
-                ffmpeg.BeginErrorReadLine();
+                await RunPipeLoop(rpicam, token);
 
-                var pipeTask = rpicam.StandardOutput.BaseStream.CopyToAsync(ffmpeg.StandardInput.BaseStream);
-
-                await Task.WhenAny(rpicam.WaitForExitAsync(token), ffmpeg.WaitForExitAsync(token));
-
-                Console.WriteLine("[PIPELINE] Process exited, restarting...");
-
-                try { if (!rpicam.HasExited) rpicam.Kill(true); } catch { }
-                try { if (!ffmpeg.HasExited) ffmpeg.Kill(true); } catch { }
                 rpicam.Dispose();
-                ffmpeg.Dispose();
                 _captureProcess = null;
-                _ffmpegProcess = null;
+
+                var ffmpeg = Interlocked.Exchange(ref _ffmpegProcess, null);
+                if (ffmpeg != null && !ffmpeg.HasExited) { try { ffmpeg.Kill(true); } catch { } }
+                ffmpeg?.Dispose();
 
                 if (!token.IsCancellationRequested)
                     await Task.Delay(1000, token);
@@ -489,6 +484,60 @@ public class CameraService : IDisposable
             {
                 Console.WriteLine($"Pipeline error: {ex.Message}");
                 await Task.Delay(2000, token);
+            }
+        }
+    }
+
+    private async Task RunPipeLoop(Process rpicam, CancellationToken token)
+    {
+        var buffer = new byte[65536];
+        var stream = rpicam.StandardOutput.BaseStream;
+
+        while (!token.IsCancellationRequested)
+        {
+            var ffmpeg = _ffmpegProcess;
+            if (ffmpeg == null || ffmpeg.HasExited)
+            {
+                if (ffmpeg != null) { try { ffmpeg.Kill(true); } catch { } ffmpeg.Dispose(); }
+
+                var ffArgs = BuildFfmpegArgs();
+                Console.WriteLine($"[PIPELINE] ffmpeg {ffArgs}");
+
+                var ffmpegPsi = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = ffArgs,
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                ffmpeg = Process.Start(ffmpegPsi);
+                if (ffmpeg == null) { await Task.Delay(1000, token); continue; }
+
+                ffmpeg.ErrorDataReceived += (_, e) =>
+                {
+                    if (!string.IsNullOrWhiteSpace(e.Data))
+                        Console.WriteLine($"ffmpeg: {e.Data}");
+                };
+                ffmpeg.BeginErrorReadLine();
+                _ffmpegProcess = ffmpeg;
+            }
+
+            try
+            {
+                var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token);
+                if (bytesRead == 0) break;
+
+                await ffmpeg.StandardInput.BaseStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (IOException)
+            {
+                _ffmpegProcess = null;
+                ffmpeg?.Dispose();
+                continue;
             }
         }
     }
