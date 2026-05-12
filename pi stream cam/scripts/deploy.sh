@@ -20,7 +20,30 @@ sudo apt-get update -qq
 sudo apt-get install -y -qq \
     libcamera-apps \
     ffmpeg \
-    build-essential
+    build-essential \
+    libzmq3-dev
+
+echo "Checking ffmpeg zmq filter support..."
+if ! ffmpeg -filters 2>/dev/null | grep -q zmq; then
+    echo "WARNING: ffmpeg zmq filter not found. Installing ffmpeg with zmq support..."
+    sudo apt-get install -y -qq libzmq5
+    # Try static build with zmq if apt version lacks it
+    if ! ffmpeg -filters 2>/dev/null | grep -q zmq; then
+        echo "ERROR: ffmpeg without zmq filter. Zoom/flip will not work."
+        echo "Install a static ffmpeg build from https://johnvansickle.com/ffmpeg/"
+        exit 1
+    fi
+fi
+
+echo "Compiling zmqsend helper..."
+if [ -f "scripts/zmqsend.c" ]; then
+    gcc -Os -s -o /tmp/zmqsend scripts/zmqsend.c -lzmq
+    sudo cp /tmp/zmqsend /usr/local/bin/zmqsend
+    sudo chown root:root /usr/local/bin/zmqsend
+    sudo chmod 755 /usr/local/bin/zmqsend
+    rm -f /tmp/zmqsend
+    echo "Installed zmqsend at /usr/local/bin/zmqsend"
+fi
 
 echo "Installing MediaMTX RTSP server..."
 if command -v mediamtx &>/dev/null; then

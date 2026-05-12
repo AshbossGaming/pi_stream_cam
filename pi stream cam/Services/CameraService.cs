@@ -9,6 +9,9 @@ namespace pi_stream_cam.Services;
 
 public class CameraService : IDisposable
 {
+    private const string ZmqAddress = "tcp://127.0.0.1:5555";
+    private const string ZmqsendPath = "/usr/local/bin/zmqsend";
+
     private readonly bool _hasCamera;
     private CancellationTokenSource? _captureCts;
 
@@ -47,6 +50,7 @@ public class CameraService : IDisposable
 
     private Process? _captureProcess;
     private Process? _ffmpegProcess;
+    private readonly object _ffmpegLock = new();
 
     public string StreamUrl => $"rtsp://picam1:8554/cam";
 
@@ -163,7 +167,17 @@ public class CameraService : IDisposable
         _zoom = Math.Clamp(level, 1, 8);
         Console.WriteLine($"Zoom set: {_zoom}x");
         SaveState();
-        KillFfmpeg();
+
+        var size = 1.0 / _zoom;
+        var cropW = (int)(1280 * size) & ~1;
+        var cropH = (int)(720 * size) & ~1;
+        var cropX = (int)((1280 - cropW) / 2.0) & ~1;
+        var cropY = (int)((720 - cropH) / 2.0) & ~1;
+
+        SendZmqCommand($"crop crop_w {cropW}");
+        SendZmqCommand($"crop crop_h {cropH}");
+        SendZmqCommand($"crop crop_x {cropX}");
+        SendZmqCommand($"crop crop_y {cropY}");
     }
 
     public void SetFocus(int value)
@@ -263,7 +277,10 @@ public class CameraService : IDisposable
 
         Console.WriteLine($"Video flipped: {_videoFlipped}");
         SaveState();
-        KillFfmpeg();
+
+        var val = flipped ? "1" : "0";
+        SendZmqCommand($"hflip enable {val}");
+        SendZmqCommand($"vflip enable {val}");
     }
 
     public void SetQuality(int quality)
@@ -275,14 +292,44 @@ public class CameraService : IDisposable
         SaveState();
     }
 
-    private void KillFfmpeg()
+    private void SendZmqCommand(string command)
     {
-        var old = Interlocked.Exchange(ref _ffmpegProcess, null);
-        if (old != null && !old.HasExited)
+        try
         {
-            try { old.Kill(true); } catch { }
+            var psi = new ProcessStartInfo
+            {
+                FileName = ZmqsendPath,
+                Arguments = $"\"{command}\" \"{ZmqAddress}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+
+            using var proc = Process.Start(psi);
+            if (proc == null)
+            {
+                Console.WriteLine($"[ZMQ] Failed to start zmqsend for: {command}");
+                return;
+            }
+
+            if (!proc.WaitForExit(2000))
+            {
+                try { proc.Kill(true); } catch { }
+                Console.WriteLine($"[ZMQ] zmqsend timed out for: {command}");
+                return;
+            }
+
+            if (proc.ExitCode != 0)
+            {
+                var err = proc.StandardError.ReadToEnd();
+                Console.WriteLine($"[ZMQ] zmqsend error ({proc.ExitCode}): {err.Trim()}");
+            }
         }
-        old?.Dispose();
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ZMQ] Error sending command: {ex.Message}");
+        }
     }
 
     public void StartCapture(
@@ -309,8 +356,15 @@ public class CameraService : IDisposable
     {
         _captureCts?.Cancel();
 
-        var rpicam = Interlocked.Exchange(ref _captureProcess, null);
-        var ffmpeg = Interlocked.Exchange(ref _ffmpegProcess, null);
+        var rpicam = _captureProcess;
+        _captureProcess = null;
+
+        Process? ffmpeg;
+        lock (_ffmpegLock)
+        {
+            ffmpeg = _ffmpegProcess;
+            _ffmpegProcess = null;
+        }
 
         foreach (var proc in new[] { rpicam, ffmpeg })
         {
@@ -400,28 +454,20 @@ public class CameraService : IDisposable
 
     private string BuildFfmpegArgs()
     {
-        var filters = new List<string>();
+        var cropW = _zoom > 1 ? (int)(1280 / _zoom) & ~1 : 1280;
+        var cropH = _zoom > 1 ? (int)(720 / _zoom) & ~1 : 720;
+        var cropX = (int)((1280 - cropW) / 2.0) & ~1;
+        var cropY = (int)((720 - cropH) / 2.0) & ~1;
 
-        if (_zoom > 1)
-        {
-            var size = 1.0 / _zoom;
-            var cropW = (int)(1280 * size) & ~1;
-            var cropH = (int)(720 * size) & ~1;
-            var cropX = (int)((1280 - cropW) / 2.0) & ~1;
-            var cropY = (int)((720 - cropH) / 2.0) & ~1;
-            filters.Add($"crop={cropW}:{cropH}:{cropX}:{cropY},scale=1280:720");
-        }
+        var flipVal = _videoFlipped ? "1" : "0";
 
-        if (_videoFlipped)
-            filters.Add("hflip,vflip");
+        var vf =
+            $"zmq=bind_address={ZmqAddress}," +
+            $"hflip=enable={flipVal},vflip=enable={flipVal}," +
+            $"crop={cropW}:{cropH}:{cropX}:{cropY}," +
+            "scale=1280:720";
 
-        if (filters.Count > 0)
-        {
-            var vf = string.Join(",", filters);
-            return $"-i pipe: -vf {vf} -c:v h264_v4l2m2m -b:v 2000k -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
-        }
-
-        return "-i pipe: -c copy -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
+        return $"-i pipe: -vf \"{vf}\" -c:v h264_v4l2m2m -b:v 2000k -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
     }
 
     private async Task CaptureLoop(
@@ -469,9 +515,15 @@ public class CameraService : IDisposable
                 rpicam.Dispose();
                 _captureProcess = null;
 
-                var ffmpeg = Interlocked.Exchange(ref _ffmpegProcess, null);
-                if (ffmpeg != null && !ffmpeg.HasExited) { try { ffmpeg.Kill(true); } catch { } }
-                ffmpeg?.Dispose();
+                lock (_ffmpegLock)
+                {
+                    if (_ffmpegProcess != null)
+                    {
+                        try { _ffmpegProcess.Kill(true); } catch { }
+                        _ffmpegProcess.Dispose();
+                        _ffmpegProcess = null;
+                    }
+                }
 
                 if (!token.IsCancellationRequested)
                     await Task.Delay(1000, token);
@@ -493,38 +545,12 @@ public class CameraService : IDisposable
         var buffer = new byte[65536];
         var stream = rpicam.StandardOutput.BaseStream;
 
+        // Start ffmpeg once and keep it running
+        var ffmpeg = StartFfmpeg();
+        if (ffmpeg == null) return;
+
         while (!token.IsCancellationRequested)
         {
-            var ffmpeg = _ffmpegProcess;
-            if (ffmpeg == null || ffmpeg.HasExited)
-            {
-                if (ffmpeg != null) { try { ffmpeg.Kill(true); } catch { } ffmpeg.Dispose(); }
-
-                var ffArgs = BuildFfmpegArgs();
-                Console.WriteLine($"[PIPELINE] ffmpeg {ffArgs}");
-
-                var ffmpegPsi = new ProcessStartInfo
-                {
-                    FileName = "ffmpeg",
-                    Arguments = ffArgs,
-                    UseShellExecute = false,
-                    RedirectStandardInput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                ffmpeg = Process.Start(ffmpegPsi);
-                if (ffmpeg == null) { await Task.Delay(1000, token); continue; }
-
-                ffmpeg.ErrorDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrWhiteSpace(e.Data))
-                        Console.WriteLine($"ffmpeg: {e.Data}");
-                };
-                ffmpeg.BeginErrorReadLine();
-                _ffmpegProcess = ffmpeg;
-            }
-
             try
             {
                 var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token);
@@ -535,11 +561,51 @@ public class CameraService : IDisposable
             catch (OperationCanceledException) { break; }
             catch (IOException)
             {
-                _ffmpegProcess = null;
-                ffmpeg?.Dispose();
-                continue;
+                Console.WriteLine("[PIPELINE] ffmpeg pipe broken, restarting...");
+                ffmpeg!.Dispose();
+                lock (_ffmpegLock) { _ffmpegProcess = null; }
+
+                var newFfmpeg = StartFfmpeg();
+                if (newFfmpeg == null)
+                {
+                    await Task.Delay(2000, token);
+                    continue;
+                }
+                ffmpeg = newFfmpeg;
             }
         }
+    }
+
+    private Process? StartFfmpeg()
+    {
+        var ffArgs = BuildFfmpegArgs();
+        Console.WriteLine($"[PIPELINE] ffmpeg {ffArgs}");
+
+        var ffmpegPsi = new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            Arguments = ffArgs,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        var ffmpeg = Process.Start(ffmpegPsi);
+        if (ffmpeg == null)
+        {
+            Console.WriteLine("[PIPELINE] Failed to start ffmpeg");
+            return null;
+        }
+
+        ffmpeg.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+                Console.WriteLine($"ffmpeg: {e.Data}");
+        };
+        ffmpeg.BeginErrorReadLine();
+        lock (_ffmpegLock) { _ffmpegProcess = ffmpeg; }
+        return ffmpeg;
     }
 
     public void Dispose()
