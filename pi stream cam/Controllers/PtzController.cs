@@ -57,13 +57,24 @@ public class PtzController : ControllerBase
     {
         if (!IsAuthenticated()) return Unauthorized();
         if (preset == null) return BadRequest(new { error = "Preset body is required" });
-        _servoService.SetPreset(index, preset.Pan, preset.Tilt);
+        _servoService.SetPreset(index, preset.Pan, preset.Tilt, preset.Zoom);
         return Ok(new { presets = _servoService.Presets });
+    }
+
+    [HttpPost("presets/{index}/recall")]
+    public IActionResult RecallPreset(int index)
+    {
+        if (!IsAuthenticated()) return Unauthorized();
+        var preset = _servoService.RecallPreset(index);
+        if (preset == null) return NotFound(new { error = "Preset not found" });
+        _cameraService.SetZoom(preset.Zoom);
+        return Ok(new { pan = preset.Pan, tilt = preset.Tilt, zoom = preset.Zoom });
     }
 
     [HttpDelete("presets/{index}")]
     public IActionResult ClearPreset(int index)
     {
+        if (!IsAuthenticated()) return Unauthorized();
         _servoService.ClearPreset(index);
         return Ok(new { presets = _servoService.Presets });
     }
@@ -125,14 +136,14 @@ public class PtzController : ControllerBase
     }
 
     [HttpPost("contrast/{value}")]
-    public IActionResult SetContrast(int value)
+    public IActionResult SetContrast(double value)
     {
         _cameraService.SetContrast(value);
         return Ok(new { contrast = _cameraService.Contrast });
     }
 
     [HttpPost("saturation/{value}")]
-    public IActionResult SetSaturation(int value)
+    public IActionResult SetSaturation(double value)
     {
         _cameraService.SetSaturation(value);
         return Ok(new { saturation = _cameraService.Saturation });

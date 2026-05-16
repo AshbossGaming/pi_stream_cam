@@ -22,8 +22,8 @@ public class StreamController : ControllerBase
             url = _cameraService.StreamUrl,
             type = "RTSP/H.264",
             note = "Add Media Source in OBS, enter rtsp://picam1:8554/cam as URL",
-            width = 1280,
-            height = 720
+            width = 1920,
+            height = 1080
         });
     }
 }

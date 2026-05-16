@@ -18,7 +18,7 @@ public class ServoService : IDisposable
     private Pca9685? _pca9685;
     private bool _hardwareInitAttempted;
 
-    private List<PtzPreset> _presets = new() { null!, null!, null!, null! };
+    private List<PtzPreset> _presets = new() { null!, null!, null!, null!, null!, null!, null!, null!, null!, null! };
     private CancellationTokenSource? _debounceSaveCts;
 
     public int PanAngle => _panAngle;
@@ -86,8 +86,8 @@ public class ServoService : IDisposable
                     _panAngle = Math.Clamp(state.Pan, 0, 180);
                     _tiltAngle = Math.Clamp(state.Tilt, 0, 180);
                     _presets = state.Presets ?? new List<PtzPreset>();
-                    // Ensure we have exactly 4 preset slots to match the UI
-                    while (_presets.Count < 4) _presets.Add(null!);
+                    // Ensure we have exactly 10 preset slots
+                    while (_presets.Count < 10) _presets.Add(null!);
                     Console.WriteLine($"Restored position: Pan={_panAngle}Â°, Tilt={_tiltAngle}Â°, Presets={_presets.Count(p => p != null)}");
                 }
             }
@@ -157,23 +157,35 @@ public class ServoService : IDisposable
         }
     }
 
-    public void SetPreset(int index, int pan, int tilt)
+    public void SetPreset(int index, int pan, int tilt, int zoom)
     {
         lock (_lock)
         {
-            if (index >= 0 && index < 4)
+            if (index >= 0 && index < 10)
             {
-                _presets[index] = new PtzPreset { Pan = pan, Tilt = tilt };
+                _presets[index] = new PtzPreset { Pan = pan, Tilt = tilt, Zoom = zoom };
                 SaveState();
             }
         }
+    }
+
+    public PtzPreset? RecallPreset(int index)
+    {
+        lock (_lock)
+        {
+            if (index >= 0 && index < 10 && _presets[index] != null)
+            {
+                return _presets[index];
+            }
+        }
+        return null;
     }
 
     public void ClearPreset(int index)
     {
         lock (_lock)
         {
-            if (index >= 0 && index < 4)
+            if (index >= 0 && index < 10)
             {
                 _presets[index] = null!;
                 SaveState();

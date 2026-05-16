@@ -249,7 +249,7 @@
     
     <div class="slider-group">
         <label>Brightness <span id="brightValue">0</span></label>
-        <input type="range" id="brightSlider" min="-10" max="10" value="0" oninput="updateBrightness()" onchange="setBrightness()">
+        <input type="range" id="brightSlider" min="-1" max="1" value="0" oninput="updateBrightness()" onchange="setBrightness()">
     </div>
     
     <div class="slider-group">
@@ -277,6 +277,12 @@
         <button class="btn preset-btn" id="preset1" onclick="presetAction(1)" ondblclick="presetSet(1)" oncontextmenu="event.preventDefault(); presetClear(1);">Preset 2</button>
         <button class="btn preset-btn" id="preset2" onclick="presetAction(2)" ondblclick="presetSet(2)" oncontextmenu="event.preventDefault(); presetClear(2);">Preset 3</button>
         <button class="btn preset-btn" id="preset3" onclick="presetAction(3)" ondblclick="presetSet(3)" oncontextmenu="event.preventDefault(); presetClear(3);">Preset 4</button>
+        <button class="btn preset-btn" id="preset4" onclick="presetAction(4)" ondblclick="presetSet(4)" oncontextmenu="event.preventDefault(); presetClear(4);">Preset 5</button>
+        <button class="btn preset-btn" id="preset5" onclick="presetAction(5)" ondblclick="presetSet(5)" oncontextmenu="event.preventDefault(); presetClear(5);">Preset 6</button>
+        <button class="btn preset-btn" id="preset6" onclick="presetAction(6)" ondblclick="presetSet(6)" oncontextmenu="event.preventDefault(); presetClear(6);">Preset 7</button>
+        <button class="btn preset-btn" id="preset7" onclick="presetAction(7)" ondblclick="presetSet(7)" oncontextmenu="event.preventDefault(); presetClear(7);">Preset 8</button>
+        <button class="btn preset-btn" id="preset8" onclick="presetAction(8)" ondblclick="presetSet(8)" oncontextmenu="event.preventDefault(); presetClear(8);">Preset 9</button>
+        <button class="btn preset-btn" id="preset9" onclick="presetAction(9)" ondblclick="presetSet(9)" oncontextmenu="event.preventDefault(); presetClear(9);">Preset 10</button>
         <button class="btn full danger" onclick="center()">Center</button>
     </div>
 
@@ -415,6 +421,9 @@
                 updateSliders();
                 setAngle('pan', presets[index].pan);
                 setTimeout(() => setAngle('tilt', presets[index].tilt), 100);
+                if (presets[index].zoom) {
+                    setZoom(presets[index].zoom);
+                }
                 updateStatus('Loaded Preset ' + (index + 1), 'success');
             } else {
                 updateStatus('Preset ' + (index + 1) + ' is empty. Double-click to set.', 'error');
@@ -425,11 +434,11 @@
             // Double press: save current position to preset
             const result = await apiCall('/api/ptz/presets/' + index, {
                 method: 'POST',
-                body: JSON.stringify({ pan: currentPan, tilt: currentTilt })
+                body: JSON.stringify({ pan: currentPan, tilt: currentTilt, zoom: currentZoom })
             });
             if (result) {
                 presets = result.presets;
-                updateStatus('Preset ' + (index + 1) + ' saved: Pan ' + currentPan + '\u00B0, Tilt ' + currentTilt + '\u00B0', 'success');
+                updateStatus('Preset ' + (index + 1) + ' saved: Pan ' + currentPan + '\u00B0, Tilt ' + currentTilt + '\u00B0, Zoom ' + currentZoom + 'x', 'success');
             }
         }
         
@@ -457,7 +466,11 @@
         }
 
         async function commitZoom() {
-            currentZoom = parseInt(document.getElementById('zoomSlider').value);
+            await setZoom(document.getElementById('zoomSlider').value);
+        }
+
+        async function setZoom(level) {
+            currentZoom = parseInt(level);
             document.getElementById('zoomValue').textContent = currentZoom + 'x';
             const result = await apiCall('/api/ptz/zoom/' + currentZoom, { method: 'POST' });
             if (result) {
@@ -506,7 +519,7 @@
         }
         
         async function toggleAfSingle() {
-            if (afMode === 'single') {
+            if (afMode === 'auto' || afMode === 'single') {
                 afMode = 'manual';
                 autoFocus = false;
                 document.getElementById('afSingleBtn').classList.remove('active');
@@ -514,7 +527,7 @@
                 document.getElementById('afBtn').textContent = 'Manual';
                 document.getElementById('focusSlider').disabled = false;
             } else {
-                afMode = 'single';
+                afMode = 'auto';
                 autoFocus = false;
                 document.getElementById('afSingleBtn').classList.add('active');
                 document.getElementById('afBtn').classList.remove('active');
@@ -585,13 +598,13 @@
         
         async function updateBrightness() {
             const slider = document.getElementById('brightSlider');
-            const value = parseInt(slider.value) / 10;
-            document.getElementById('brightValue').textContent = value > 0 ? '+' + value : value.toFixed(1);
+            const value = parseInt(slider.value);
+            document.getElementById('brightValue').textContent = value > 0 ? '+' + value : value;
         }
         
         async function setBrightness() {
             const slider = document.getElementById('brightSlider');
-            const value = parseInt(slider.value) / 10;
+            const value = parseInt(slider.value);
             const result = await apiCall('/api/ptz/brightness/' + value, { method: 'POST' });
             if (result) {
                 brightness = result.brightness;
@@ -635,10 +648,13 @@
         }
         
         function syncAfState() {
-            const isAf = afMode === 'continuous' || afMode === 'single';
+            const isAuto = afMode === 'auto' || afMode === 'single';
+            const isAf = afMode === 'continuous' || isAuto;
             document.getElementById('afBtn').classList.toggle('active', afMode === 'continuous');
-            document.getElementById('afSingleBtn').classList.toggle('active', afMode === 'single');
-            document.getElementById('afBtn').textContent = isAf ? 'AF: ' + afMode : 'Manual';
+            document.getElementById('afSingleBtn').classList.toggle('active', isAuto);
+            document.getElementById('afBtn').textContent = isAf
+                ? (afMode === 'continuous' ? 'AF: Continuous' : 'AF: Single')
+                : 'Manual';
             document.getElementById('focusSlider').disabled = isAf;
         }
         
@@ -670,8 +686,8 @@
                 document.getElementById('wbValue').textContent = wbModes[whiteBalance] || 'Auto';
                 document.getElementById('sharpSlider').value = Math.round(sharpness * 10);
                 document.getElementById('sharpValue').textContent = sharpness.toFixed(1);
-                document.getElementById('brightSlider').value = Math.round(brightness * 10);
-                document.getElementById('brightValue').textContent = brightness > 0 ? '+' + brightness : brightness.toFixed(1);
+                document.getElementById('brightSlider').value = brightness;
+                document.getElementById('brightValue').textContent = brightness > 0 ? '+' + brightness : brightness;
                 document.getElementById('contrastSlider').value = Math.round(contrast * 10);
                 document.getElementById('contrastValue').textContent = contrast.toFixed(1);
                 document.getElementById('satSlider').value = Math.round(saturation * 10);

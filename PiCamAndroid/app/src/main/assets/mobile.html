@@ -478,7 +478,7 @@
         }
         
         async function toggleAfSingle() {
-            if (afMode === 'single') {
+            if (afMode === 'auto' || afMode === 'single') {
                 afMode = 'manual';
                 autoFocus = false;
                 document.getElementById('afSingleBtn').classList.remove('active');
@@ -486,7 +486,7 @@
                 document.getElementById('afBtn').textContent = 'Manual';
                 document.getElementById('focusSlider').disabled = false;
             } else {
-                afMode = 'single';
+                afMode = 'auto';
                 autoFocus = false;
                 document.getElementById('afSingleBtn').classList.add('active');
                 document.getElementById('afBtn').classList.remove('active');
@@ -607,10 +607,13 @@
         }
         
         function syncAfState() {
-            const isAf = afMode === 'continuous' || afMode === 'single';
+            const isAuto = afMode === 'auto' || afMode === 'single';
+            const isAf = afMode === 'continuous' || isAuto;
             document.getElementById('afBtn').classList.toggle('active', afMode === 'continuous');
-            document.getElementById('afSingleBtn').classList.toggle('active', afMode === 'single');
-            document.getElementById('afBtn').textContent = isAf ? 'AF: ' + afMode : 'Manual';
+            document.getElementById('afSingleBtn').classList.toggle('active', isAuto);
+            document.getElementById('afBtn').textContent = isAf
+                ? (afMode === 'continuous' ? 'AF: Continuous' : 'AF: Single')
+                : 'Manual';
             document.getElementById('focusSlider').disabled = isAf;
         }
         

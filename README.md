@@ -80,7 +80,7 @@ Default password: `admin` (change via `Password` config or env var)
 ### Camera Settings
 - `POST /api/ptz/zoom/{level}` - Set zoom (1-8)
 - `POST /api/ptz/focus/{value}` - Set manual focus (0-100)
-- `POST /api/ptz/autofocus/{mode}` - Set autofocus mode (continuous/single/manual)
+- `POST /api/ptz/autofocus/{mode}` - Set autofocus mode (continuous/auto/manual)
 - `POST /api/ptz/focus-range/{range}` - Set focus range (macro/normal)
 - `POST /api/ptz/exposure/{value}` - Exposure compensation (-8 to 8)
 - `POST /api/ptz/whitebalance/{value}` - White balance preset (0-8)

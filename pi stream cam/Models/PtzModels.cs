@@ -4,6 +4,7 @@ public class PtzPreset
 {
     public int Pan { get; set; }
     public int Tilt { get; set; }
+    public int Zoom { get; set; } = 1;
 }
 
 public class PtzState

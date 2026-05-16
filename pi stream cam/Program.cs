@@ -141,8 +141,8 @@ app.MapPost("/api/option", async context =>
                 case "whitebalance": camera.SetWhiteBalance(prop.Value.GetInt32()); set++; break;
                 case "sharpness": camera.SetSharpness(prop.Value.GetDouble()); set++; break;
                 case "brightness": camera.SetBrightness(prop.Value.GetInt32()); set++; break;
-                case "contrast": camera.SetContrast(prop.Value.GetInt32()); set++; break;
-                case "saturation": camera.SetSaturation(prop.Value.GetInt32()); set++; break;
+                case "contrast": camera.SetContrast(prop.Value.GetDouble()); set++; break;
+                case "saturation": camera.SetSaturation(prop.Value.GetDouble()); set++; break;
                 case "quality": camera.SetQuality(prop.Value.GetInt32()); set++; break;
                 case "videoflipped": camera.SetVideoFlip(prop.Value.GetBoolean()); set++; break;
                 case "pan": await servo.SetPanAsync(prop.Value.GetInt32()); set++; break;
@@ -197,7 +197,7 @@ app.MapGet("/api/status", () =>
         camera = new
         {
             capturing = camera.IsCapturing,
-            hasCamera = camera.IsCapturing,
+            hasCamera = camera.HasCamera,
             zoom = camera.Zoom,
             focus = camera.Focus,
             autofocus = camera.AutofocusEnabled,
@@ -228,7 +228,8 @@ app.MapGet("/api/status", () =>
             status = new { url = $"/api/status", type = "application/json" },
             ptzStatus = new { url = $"/api/ptz/status", type = "application/json" },
             ptzMove = new { url = $"/api/ptz/move", method = "POST" },
-            ptzCenter = new { url = $"/api/ptz/center", method = "POST" }
+            ptzCenter = new { url = $"/api/ptz/center", method = "POST" },
+            latency = new { url = $"/api/latency", type = "application/json" }
         },
 
         system = new
@@ -238,6 +239,28 @@ app.MapGet("/api/status", () =>
             processId = Environment.ProcessId,
             startTime = DateTime.UtcNow.ToString("o")
         }
+    });
+}).AllowAnonymous();
+
+app.MapGet("/api/latency", () =>
+{
+    var camera = cameraService;
+    return Results.Ok(new
+    {
+        focusCalibrated = ((dynamic)camera.GetStats()).focusCalibrated,
+        pipeline = new
+        {
+            elapsedMs = ((dynamic)camera.GetStats()).latency.pipelineElapsedMs,
+            chunksRead = ((dynamic)camera.GetStats()).latency.chunksRead,
+            totalDataKb = ((dynamic)camera.GetStats()).latency.totalDataKb,
+            dataRateKbps = ((dynamic)camera.GetStats()).latency.dataRateKbps,
+            avgInterarrivalMs = ((dynamic)camera.GetStats()).latency.avgInterarrivalMs,
+            estimatedFps = ((dynamic)camera.GetStats()).latency.estimatedFps,
+        },
+        estimatedEndToEndMs = ((dynamic)camera.GetStats()).latency.estimatedEndToEndMs,
+        note = "End-to-end latency estimate from camera sensor to RTSP output. " +
+                "Based on: capture+encode (~2 frames) + ffmpeg decode+filter+re-encode (~4 frames) + server relay (~1 frame). " +
+                "Actual latency depends on bitrate, resolution, and system load."
     });
 }).AllowAnonymous();
 
