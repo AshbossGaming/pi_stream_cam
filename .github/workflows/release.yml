@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "ver=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+            echo "ver=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish
+        run: |
+          cd "pi stream cam"
+          dotnet publish "pi stream cam.csproj" \
+            -c Release \
+            -r linux-arm64 \
+            -f net8.0 \
+            --self-contained true \
+            -o ../release-build
+
+      - name: Stage release files
+        run: |
+          VER="${{ steps.version.outputs.ver }}"
+          ARTIFACT_NAME="pi-stream-cam-$VER-linux-arm64.tar.gz"
+          DIR_NAME="pi-stream-cam-$VER"
+
+          mkdir -p "dist/$DIR_NAME/scripts"
+
+          # Copy published app
+          cp -r release-build/* "dist/$DIR_NAME/"
+
+          # Copy scripts needed for install
+          cp "pi stream cam/scripts/zmqsend.c" "dist/$DIR_NAME/scripts/"
+          cp "pi stream cam/scripts/pi-cam-power.c" "dist/$DIR_NAME/scripts/"
+          cp "pi stream cam/scripts/mediamtx.yml" "dist/$DIR_NAME/"
+          cp "pi stream cam/scripts/mediamtx.service" "dist/$DIR_NAME/"
+          cp "pi stream cam/scripts/pi-stream-cam.service" "dist/$DIR_NAME/"
+
+          # Copy VERSION
+          cp VERSION "dist/$DIR_NAME/"
+
+          # Create tarball
+          cd dist
+          tar -czf "$ARTIFACT_NAME" "$DIR_NAME/"
+
+          # Generate checksum
+          sha256sum "$ARTIFACT_NAME" > "$ARTIFACT_NAME.sha256"
+
+          echo "artifact=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "checksum=$ARTIFACT_NAME.sha256" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Pi Stream Cam ${{ steps.version.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          body: |
+            ## Pi Stream Cam ${{ steps.version.outputs.ver }}
+
+            ### Install
+            ```bash
+            curl -sL https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.version.outputs.tag }}/install.sh | sudo bash
+            ```
+
+            ### Upgrade from existing install
+            Same command — the install script detects and replaces previous versions.
+
+            ### What's new
+            See commit history for details.
+          files: |
+            dist/pi-stream-cam-${{ steps.version.outputs.ver }}-linux-arm64.tar.gz
+            dist/pi-stream-cam-${{ steps.version.outputs.ver }}-linux-arm64.tar.gz.sha256

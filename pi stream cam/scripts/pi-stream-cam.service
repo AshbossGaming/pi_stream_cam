@@ -1,9 +1,8 @@
 [Unit]
 Description=Pi Stream Cam - PTZ Camera Surveillance System
-Documentation=https://github.com/ash12/pi-stream-cam
+Documentation=https://github.com/AshbossGaming/pi_stream_cam
 After=network.target mediamtx.service
 Wants=network-online.target mediamtx.service
-ConditionPathExists=/dev/i2c-1
 
 [Service]
 Type=simple
@@ -11,6 +10,7 @@ DynamicUser=yes
 SupplementaryGroups=video i2c gpio
 WorkingDirectory=/opt/pi-stream-cam/current
 ExecStart=/opt/pi-stream-cam/current/pi-stream-cam
+ExecStartPre=/bin/sh -c 'test -e /dev/i2c-1 || echo "[WARN] No I2C device — servos will be simulated"'
 Restart=always
 RestartSec=10
 Nice=10

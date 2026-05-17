@@ -66,13 +66,7 @@ public class CameraService : IDisposable
     public string StreamUrl => $"rtsp://picam1:8554/cam";
 
     // Latency tracking
-    private readonly Stopwatch _pipelineTimer = Stopwatch.StartNew();
-    private long _pipeChunksRead;
-    private long _pipeTotalBytes;
-    private double _pipeLastReadTimestampMs;
-    private double _pipeInterarrivalSumMs;
-    private long _pipeInterarrivalSamples;
-    private long _pipeStartTimestamp;
+
 
     public CameraService()
     {
@@ -131,13 +125,6 @@ public class CameraService : IDisposable
 
     public object GetStats()
     {
-        var elapsed = _pipeStartTimestamp > 0
-            ? _pipelineTimer.ElapsedMilliseconds - _pipeStartTimestamp : 0L;
-        var avgInterarrival = _pipeInterarrivalSamples > 0
-            ? _pipeInterarrivalSumMs / _pipeInterarrivalSamples : 0.0;
-        var dataRate = elapsed > 0
-            ? _pipeTotalBytes / (elapsed / 1000.0) : 0.0;
-
         return new
         {
             capturing = IsCapturing,
@@ -146,36 +133,8 @@ public class CameraService : IDisposable
             height = _captureHeight,
             framerate = _captureFramerate,
             streamUrl = StreamUrl,
-            focusCalibrated = _focusCalibrated,
-            latency = new
-            {
-                pipelineElapsedMs = elapsed,
-                chunksRead = _pipeChunksRead,
-                totalDataKb = _pipeTotalBytes / 1024.0,
-                dataRateKbps = dataRate / 1024.0,
-                avgInterarrivalMs = Math.Round(avgInterarrival, 1),
-                estimatedFps = avgInterarrival > 0
-                    ? Math.Round(1000.0 / avgInterarrival, 1) : 0.0,
-                estimatedEndToEndMs = EstimateEndToEndLatency()
-            }
+            focusCalibrated = _focusCalibrated
         };
-    }
-
-    /// Estimates total camera-to-RTSP latency based on pipeline configuration
-    private int EstimateEndToEndLatency()
-    {
-        // rpicam-vid: sensor capture (~1 frame) + H.264 encode (~1-2 frames)
-        var captureMs = 1000 / _captureFramerate * 2;
-
-        // Pipe relay: negligible (microseconds), skip
-
-        // ffmpeg: h264 decode + v4l2m2m hw encode + RTSP mux (~3-6 frames)
-        var ffmpegMs = 1000 / _captureFramerate * 4;
-
-        // MediaMTX relay: ~1 frame buffer
-        var serverMs = 1000 / _captureFramerate;
-
-        return captureMs + ffmpegMs + serverMs;
     }
 
     private void LoadState()
@@ -906,26 +865,14 @@ public class CameraService : IDisposable
             await ffmpeg.StandardInput.BaseStream.WriteAsync(_h264Headers, token);
         }
 
-        _pipeStartTimestamp = _pipelineTimer.ElapsedMilliseconds;
-        _pipeLastReadTimestampMs = _pipeStartTimestamp;
         var firstRead = true;
-        var logInterval = _captureFramerate * 5;
 
         while (!token.IsCancellationRequested)
         {
             try
             {
-                var readTimestamp = _pipelineTimer.ElapsedMilliseconds;
                 var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token);
                 if (bytesRead == 0) break;
-
-                _pipeChunksRead++;
-                _pipeTotalBytes += bytesRead;
-
-                var interarrival = readTimestamp - _pipeLastReadTimestampMs;
-                _pipeInterarrivalSumMs += interarrival;
-                _pipeInterarrivalSamples++;
-                _pipeLastReadTimestampMs = readTimestamp;
 
                 // Save first chunk (contains SPS/PPS headers for decoder recovery)
                 if (firstRead)
@@ -933,28 +880,9 @@ public class CameraService : IDisposable
                     firstRead = false;
                     _h264Headers = new byte[bytesRead];
                     Array.Copy(buffer, _h264Headers, bytesRead);
-                    Console.WriteLine($"[LATENCY] First data arrived at +{readTimestamp}ms ({bytesRead} bytes)");
                 }
 
                 await ffmpeg.StandardInput.BaseStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-
-                if (_pipeChunksRead % logInterval == 0)
-                {
-                    var elapsed = _pipelineTimer.ElapsedMilliseconds - _pipeStartTimestamp;
-                    var avgInterarrival = _pipeInterarrivalSamples > 0
-                        ? _pipeInterarrivalSumMs / _pipeInterarrivalSamples : 0;
-                    var avgChunkSize = _pipeTotalBytes / (double)_pipeChunksRead;
-                    var dataRate = _pipeTotalBytes / (elapsed / 1000.0);
-
-                    Console.WriteLine(
-                        $"[LATENCY] elapsed={elapsed}ms | " +
-                        $"chunks={_pipeChunksRead} | " +
-                        $"totalBytes={_pipeTotalBytes / 1024.0:F1}KB | " +
-                        $"avgChunk={avgChunkSize:F0}B | " +
-                        $"avgInterarrival={avgInterarrival:F1}ms | " +
-                        $"dataRate={dataRate / 1024.0:F1}KB/s | " +
-                        $"estFps={(avgInterarrival > 0 ? 1000.0 / avgInterarrival : 0):F1}");
-                }
             }
             catch (OperationCanceledException) { break; }
             catch (IOException)

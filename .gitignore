@@ -3,3 +3,36 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+
+# Build artifacts
+publish/
+release-build/
+dist/
+build/
+publish-arm64/
+publish-deploy/
+publish-fd/
+
+# Android project
+PiCamAndroid/
+
+# Random helper scripts
+*.py
+
+# PTZ tooling
+ptz/
+ptz-tool/
+
+# Other junk
+.junie/
+plink_err.txt
+plink_out.txt
+publish-deploy.tar.gz
+
+# IDE
+.idea/
+*.sln.DotSettings.user
+
+# OS
+Thumbs.db
+.DS_Store

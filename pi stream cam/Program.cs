@@ -229,7 +229,6 @@ app.MapGet("/api/status", () =>
             ptzStatus = new { url = $"/api/ptz/status", type = "application/json" },
             ptzMove = new { url = $"/api/ptz/move", method = "POST" },
             ptzCenter = new { url = $"/api/ptz/center", method = "POST" },
-            latency = new { url = $"/api/latency", type = "application/json" }
         },
 
         system = new
@@ -242,27 +241,7 @@ app.MapGet("/api/status", () =>
     });
 }).AllowAnonymous();
 
-app.MapGet("/api/latency", () =>
-{
-    var camera = cameraService;
-    return Results.Ok(new
-    {
-        focusCalibrated = ((dynamic)camera.GetStats()).focusCalibrated,
-        pipeline = new
-        {
-            elapsedMs = ((dynamic)camera.GetStats()).latency.pipelineElapsedMs,
-            chunksRead = ((dynamic)camera.GetStats()).latency.chunksRead,
-            totalDataKb = ((dynamic)camera.GetStats()).latency.totalDataKb,
-            dataRateKbps = ((dynamic)camera.GetStats()).latency.dataRateKbps,
-            avgInterarrivalMs = ((dynamic)camera.GetStats()).latency.avgInterarrivalMs,
-            estimatedFps = ((dynamic)camera.GetStats()).latency.estimatedFps,
-        },
-        estimatedEndToEndMs = ((dynamic)camera.GetStats()).latency.estimatedEndToEndMs,
-        note = "End-to-end latency estimate from camera sensor to RTSP output. " +
-                "Based on: capture+encode (~2 frames) + ffmpeg decode+filter+re-encode (~4 frames) + server relay (~1 frame). " +
-                "Actual latency depends on bitrate, resolution, and system load."
-    });
-}).AllowAnonymous();
+
 
 app.MapGet("/", () => Results.Ok(new
 {
