@@ -9,33 +9,30 @@ namespace pi_stream_cam.Services;
 
 public class CameraService : IDisposable
 {
-    private const string ZmqAddress = "tcp://127.0.0.1:5555";
-    private const string ZmqsendPath = "/usr/local/bin/zmqsend";
+    private const string V4l2CtlPath = "/usr/bin/v4l2-ctl";
     private static readonly string FfmpegPath = ResolveFfmpegPath();
     private const string FfmpegPathFile = "/etc/pi-stream-cam-ffmpeg-path";
 
+    private readonly string _devicePath;
     private readonly bool _hasCamera;
-    private readonly bool _hasZmq;
-    private byte[]? _h264Headers;
     private CancellationTokenSource? _captureCts;
 
     private int _zoom = 1;
     private int _focus = 50;
     private bool _autofocus = true;
     private string _afMode = "continuous";
-    private string _focusRange = "normal";
+    private string _focusRange = "full";
     private int _exposureComp = 0;
     private int _whiteBalance = 0;
-    private double _sharpness = 1.0;
+    private double _sharpness = 6.0;
     private int _brightness = 0;
-    private double _contrast = 1.0;
-    private double _saturation = 1.0;
+    private double _contrast = 1.2;
+    private double _saturation = 1.1;
     private int _quality = 40;
     private bool _videoFlipped;
     private int _captureWidth = 1920;
     private int _captureHeight = 1080;
     private int _captureFramerate = 30;
-    private bool _initialFocus = true;
     private bool _focusCalibrated;
 
     private static readonly string[] AwbPresets = { "auto", "incandescent", "tungsten", "fluorescent", "daylight", "cloudy", "shade", "custom" };
@@ -60,21 +57,15 @@ public class CameraService : IDisposable
 
     private Process? _captureProcess;
     private readonly object _captureLock = new();
-    private Process? _ffmpegProcess;
-    private readonly object _ffmpegLock = new();
 
     public string StreamUrl => $"rtsp://picam1:8554/cam";
 
-    // Latency tracking
-
-
-    public CameraService()
+    public CameraService(string devicePath = "/dev/video0")
     {
+        _devicePath = devicePath;
         _hasCamera =
             RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
-            File.Exists("/usr/bin/rpicam-vid");
-
-        _hasZmq = CheckZmqSupport();
+            File.Exists(_devicePath);
 
         LoadState();
     }
@@ -94,35 +85,6 @@ public class CameraService : IDisposable
         return "ffmpeg";
     }
 
-    private static bool CheckZmqSupport()
-    {
-        try
-        {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                return false;
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = FfmpegPath,
-                Arguments = "-filters",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true
-            };
-
-            using var proc = Process.Start(psi);
-            if (proc == null) return false;
-
-            var output = proc.StandardOutput.ReadToEnd();
-            proc.WaitForExit(5000);
-            return output.Contains("zmq");
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     public object GetStats()
     {
         return new
@@ -133,7 +95,8 @@ public class CameraService : IDisposable
             height = _captureHeight,
             framerate = _captureFramerate,
             streamUrl = StreamUrl,
-            focusCalibrated = _focusCalibrated
+            focusCalibrated = _focusCalibrated,
+            device = _devicePath
         };
     }
 
@@ -236,24 +199,7 @@ public class CameraService : IDisposable
         _zoom = Math.Clamp(level, 1, 8);
         Console.WriteLine($"Zoom set: {_zoom}x");
         SaveState();
-
-        if (_hasZmq)
-        {
-            var size = 1.0 / _zoom;
-            var cropW = (int)(_captureWidth * size) & ~1;
-            var cropH = (int)(_captureHeight * size) & ~1;
-            var cropX = (int)((_captureWidth - cropW) / 2.0) & ~1;
-            var cropY = (int)((_captureHeight - cropH) / 2.0) & ~1;
-
-            SendZmqCommand($"crop w {cropW}");
-            SendZmqCommand($"crop h {cropH}");
-            SendZmqCommand($"crop x {cropX}");
-            SendZmqCommand($"crop y {cropY}");
-        }
-        else
-        {
-            KillFfmpeg();
-        }
+        KillFfmpeg();
     }
 
     public void SetFocus(int value)
@@ -261,30 +207,27 @@ public class CameraService : IDisposable
         _focus = Math.Clamp(value, 0, 100);
         _autofocus = false;
         _afMode = "manual";
-
         Console.WriteLine($"Focus set: {_focus}");
         SaveState();
-        RestartPipeline();
+        ApplyV4l2Controls();
     }
 
     public void EnableAutofocus(string mode = "continuous")
     {
         _autofocus = true;
         _afMode = mode;
-
         Console.WriteLine($"Autofocus enabled: {_afMode}");
         SaveState();
-        RestartPipeline();
+        ApplyV4l2Controls();
     }
 
     public void DisableAutofocus()
     {
         _autofocus = false;
         _afMode = "manual";
-
         Console.WriteLine("Autofocus disabled");
         SaveState();
-        RestartPipeline();
+        ApplyV4l2Controls();
     }
 
     public void SetAfMode(string mode)
@@ -296,7 +239,7 @@ public class CameraService : IDisposable
             _afMode = mode;
             Console.WriteLine($"AF mode: {_afMode}");
             SaveState();
-            RestartPipeline();
+            ApplyV4l2Controls();
         }
     }
 
@@ -305,7 +248,6 @@ public class CameraService : IDisposable
         _focusRange = range;
         Console.WriteLine($"Focus range: {_focusRange}");
         SaveState();
-        RestartPipeline();
     }
 
     public void SetExposureCompensation(int value)
@@ -313,6 +255,7 @@ public class CameraService : IDisposable
         _exposureComp = Math.Clamp(value, -8, 8);
         Console.WriteLine($"Exposure compensation: {_exposureComp}");
         SaveState();
+        ApplyV4l2Controls();
     }
 
     public void SetWhiteBalance(int value)
@@ -320,6 +263,7 @@ public class CameraService : IDisposable
         _whiteBalance = Math.Clamp(value, 0, 8);
         Console.WriteLine($"White balance: {_whiteBalance}");
         SaveState();
+        ApplyV4l2Controls();
     }
 
     public void SetSharpness(double value)
@@ -327,6 +271,7 @@ public class CameraService : IDisposable
         _sharpness = value;
         Console.WriteLine($"Sharpness: {_sharpness}");
         SaveState();
+        ApplyV4l2Controls();
     }
 
     public void SetBrightness(int value)
@@ -334,6 +279,7 @@ public class CameraService : IDisposable
         _brightness = Math.Clamp(value, -1, 1);
         Console.WriteLine($"Brightness: {_brightness}");
         SaveState();
+        ApplyV4l2Controls();
     }
 
     public void SetContrast(double value)
@@ -341,6 +287,7 @@ public class CameraService : IDisposable
         _contrast = Math.Clamp(value, 0.0, 2.0);
         Console.WriteLine($"Contrast: {_contrast:F1}");
         SaveState();
+        ApplyV4l2Controls();
     }
 
     public void SetSaturation(double value)
@@ -348,6 +295,7 @@ public class CameraService : IDisposable
         _saturation = Math.Clamp(value, 0.0, 2.0);
         Console.WriteLine($"Saturation: {_saturation:F1}");
         SaveState();
+        ApplyV4l2Controls();
     }
 
     public void SetVideoFlip(bool flipped)
@@ -356,63 +304,73 @@ public class CameraService : IDisposable
             return;
 
         _videoFlipped = flipped;
-
         Console.WriteLine($"Video flipped: {_videoFlipped}");
         SaveState();
-
-        if (_hasZmq)
-        {
-            var val = flipped ? "1" : "0";
-            SendZmqCommand($"vflip enable {val}");
-        }
-        else
-        {
-            KillFfmpeg();
-        }
+        KillFfmpeg();
     }
 
     public void SetQuality(int quality)
     {
         _quality = Math.Clamp(quality, 10, 100);
-
         Console.WriteLine($"JPEG Quality: {_quality}");
-
         SaveState();
     }
 
     private void KillFfmpeg()
     {
-        lock (_ffmpegLock)
-        {
-            if (_ffmpegProcess != null && !_ffmpegProcess.HasExited)
-            {
-                try { _ffmpegProcess.Kill(true); } catch (Exception ex) { Console.WriteLine($"Failed to kill ffmpeg: {ex.Message}"); }
-                _ffmpegProcess.Dispose();
-                _ffmpegProcess = null;
-            }
-        }
-    }
-
-    private void RestartPipeline()
-    {
-        Console.WriteLine("[PIPELINE] Restarting rpicam-vid to apply new settings...");
         lock (_captureLock)
         {
             if (_captureProcess != null && !_captureProcess.HasExited)
             {
-                try { _captureProcess.Kill(true); } catch (Exception ex) { Console.WriteLine($"Failed to kill rpicam-vid: {ex.Message}"); }
+                try { _captureProcess.Kill(true); } catch (Exception ex) { Console.WriteLine($"Failed to kill ffmpeg: {ex.Message}"); }
+                _captureProcess.Dispose();
+                _captureProcess = null;
             }
         }
     }
 
-    private void SendZmqCommand(string command)
+    private void ApplyV4l2Controls()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || !File.Exists(V4l2CtlPath))
+            return;
+
+        if (_autofocus)
+        {
+            RunV4l2Ctl("focus_automatic_continuous=1");
+        }
+        else
+        {
+            RunV4l2Ctl("focus_automatic_continuous=0");
+            var focusVal = (int)(_focus / 100.0 * 255);
+            RunV4l2Ctl($"focus_absolute={Math.Clamp(focusVal, 0, 255)}");
+        }
+
+        if (_whiteBalance == 0)
+            RunV4l2Ctl("white_balance_automatic=1");
+        else
+            RunV4l2Ctl("white_balance_automatic=0");
+
+        var sharpVal = (int)(_sharpness / 16.0 * 255);
+        RunV4l2Ctl($"sharpness={Math.Clamp(sharpVal, 0, 255)}");
+
+        var brightVal = (int)((_brightness + 1.0) / 2.0 * 255);
+        RunV4l2Ctl($"brightness={Math.Clamp(brightVal, 0, 255)}");
+
+        var contrastVal = (int)(_contrast / 2.0 * 255);
+        RunV4l2Ctl($"contrast={Math.Clamp(contrastVal, 0, 255)}");
+
+        var satVal = (int)(_saturation / 2.0 * 255);
+        RunV4l2Ctl($"saturation={Math.Clamp(satVal, 0, 255)}");
+    }
+
+    private void RunV4l2Ctl(string controlArg)
     {
         try
         {
             var psi = new ProcessStartInfo
             {
-                FileName = ZmqsendPath,
-                Arguments = $"\"{command}\" \"{ZmqAddress}\"",
+                FileName = V4l2CtlPath,
+                Arguments = $"-d {_devicePath} --set-ctrl={controlArg}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true,
@@ -420,197 +378,16 @@ public class CameraService : IDisposable
             };
 
             using var proc = Process.Start(psi);
-            if (proc == null)
-            {
-                Console.WriteLine($"[ZMQ] Failed to start zmqsend for: {command}");
-                return;
-            }
-
+            if (proc == null) return;
             if (!proc.WaitForExit(2000))
             {
                 try { proc.Kill(true); } catch { }
-                Console.WriteLine($"[ZMQ] zmqsend timed out for: {command}");
-                return;
-            }
-
-            if (proc.ExitCode != 0)
-            {
-                var err = proc.StandardError.ReadToEnd();
-                Console.WriteLine($"[ZMQ] zmqsend error ({proc.ExitCode}): {err.Trim()}");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ZMQ] Error sending command: {ex.Message}");
+            Console.WriteLine($"[V4L2] Failed to set {controlArg}: {ex.Message}");
         }
-    }
-
-    public void StartCapture(
-        int width = 1920,
-        int height = 1080,
-        int framerate = 30)
-    {
-        if (!_hasCamera)
-        {
-            Console.WriteLine("Camera capture requires rpicam-vid");
-            return;
-        }
-
-        if (IsCapturing)
-            return;
-
-        _captureWidth = width;
-        _captureHeight = height;
-        _captureFramerate = framerate;
-        _captureCts = new CancellationTokenSource();
-
-        Task.Run(() =>
-            CaptureLoop(width, height, framerate, _captureCts.Token));
-    }
-
-    public void StopCapture()
-    {
-        _captureCts?.Cancel();
-
-        Process? rpicam;
-        lock (_captureLock)
-        {
-            rpicam = _captureProcess;
-            _captureProcess = null;
-        }
-
-        Process? ffmpeg;
-        lock (_ffmpegLock)
-        {
-            ffmpeg = _ffmpegProcess;
-            _ffmpegProcess = null;
-        }
-
-        foreach (var proc in new[] { rpicam, ffmpeg })
-        {
-            try
-            {
-                if (proc != null && !proc.HasExited)
-                    proc.Kill(true);
-            }
-            catch { }
-            proc?.Dispose();
-        }
-
-        _captureCts = null;
-    }
-
-    private string[] BuildRpicamVidArgs(
-        int width,
-        int height,
-        int framerate)
-    {
-        var args = new List<string>
-        {
-            "--codec", "h264",
-            "--profile", "main",
-            "--output", "-",
-            "--nopreview",
-            "--width", width.ToString(),
-            "--height", height.ToString(),
-            "--framerate", framerate.ToString(),
-            "--timeout", "0",
-            "--intra", "15",
-            "--inline",
-            "--bitrate", "20000000"
-        };
-
-        if (_initialFocus)
-        {
-            args.Add("--autofocus-mode");
-            args.Add("auto");
-        }
-        else if (_autofocus)
-        {
-            args.Add("--autofocus-mode");
-            args.Add(_afMode == "single" ? "auto" : _afMode);
-        }
-        else
-        {
-            args.Add("--autofocus-mode");
-            args.Add("manual");
-            args.Add("--lens-position");
-            args.Add((_focus / 100.0).ToString("F2", CultureInfo.InvariantCulture));
-        }
-
-        if (_focusRange == "macro")
-        {
-            args.Add("--autofocus-range");
-            args.Add("macro");
-        }
-
-        if (_exposureComp != 0)
-        {
-            args.Add("--ev");
-            args.Add(_exposureComp.ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (_whiteBalance >= 0 && _whiteBalance < AwbPresets.Length)
-        {
-            args.Add("--awb");
-            args.Add(AwbPresets[_whiteBalance]);
-        }
-
-        if (Math.Abs(_sharpness - 1.0) > 0.01)
-        {
-            args.Add("--sharpness");
-            args.Add(_sharpness.ToString("F2", CultureInfo.InvariantCulture));
-        }
-
-        if (_brightness != 0)
-        {
-            args.Add("--brightness");
-            args.Add(_brightness.ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (_contrast != 1)
-        {
-            args.Add("--contrast");
-            args.Add(_contrast.ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (_saturation != 1)
-        {
-            args.Add("--saturation");
-            args.Add(_saturation.ToString(CultureInfo.InvariantCulture));
-        }
-
-        return args.ToArray();
-    }
-
-    private string BuildFfmpegArgs()
-    {
-        var cropW = _zoom > 1 ? (int)(_captureWidth / _zoom) & ~1 : _captureWidth;
-        var cropH = _zoom > 1 ? (int)(_captureHeight / _zoom) & ~1 : _captureHeight;
-        var cropX = (int)((_captureWidth - cropW) / 2.0) & ~1;
-        var cropY = (int)((_captureHeight - cropH) / 2.0) & ~1;
-
-        var flipEnabled = _videoFlipped ? "1" : "0";
-
-        string vf;
-        if (_hasZmq)
-        {
-            vf =
-                "zmq," +
-                $"vflip=enable={flipEnabled}," +
-                $"crop={cropW}:{cropH}:{cropX}:{cropY}," +
-                $"scale={_captureWidth}:{_captureHeight}";
-        }
-        else
-        {
-            vf =
-                $"vflip=enable={flipEnabled}," +
-                $"crop={cropW}:{cropH}:{cropX}:{cropY}," +
-                $"scale={_captureWidth}:{_captureHeight}";
-        }
-
-        var bitrate = _captureHeight >= 1080 ? 20000 : 2000;
-        return $"-analyzeduration 1M -probesize 1M -fflags +genpts+discardcorrupt -f h264 -i pipe:0 -vf \"{vf}\" -c:v h264_v4l2m2m -b:v {bitrate}k -f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
     }
 
     private void KillStaleProcesses(string name)
@@ -653,89 +430,35 @@ public class CameraService : IDisposable
         catch { }
     }
 
-    private async Task CalibrateFocusAsync(
-        int width,
-        int height,
-        int framerate,
-        CancellationToken token)
+    public void StartCapture(
+        int width = 1920,
+        int height = 1080,
+        int framerate = 30)
     {
-        Console.WriteLine("[FOCUS] Starting focus calibration...");
-
-        try
+        if (!_hasCamera)
         {
-            var args = new List<string>
-            {
-                "--codec", "h264",
-                "--profile", "main",
-                "--output", "/dev/null",
-                "--nopreview",
-                "--width", width.ToString(),
-                "--height", height.ToString(),
-                "--framerate", framerate.ToString(),
-                "--timeout", "3000",
-                "--autofocus-mode", "auto",
-            };
-
-            if (_focusRange == "macro")
-            {
-                args.Add("--autofocus-range");
-                args.Add("macro");
-            }
-
-            Console.WriteLine($"[FOCUS] rpicam-vid {string.Join(" ", args)}");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "rpicam-vid",
-                Arguments = string.Join(" ", args),
-                UseShellExecute = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            psi.Environment["LIBCAMERA_LOG_LEVELS"] = "ERROR";
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            cts.CancelAfter(5000);
-
-            using var proc = Process.Start(psi);
-            if (proc == null)
-            {
-                Console.WriteLine("[FOCUS] Failed to start calibration process");
-                return;
-            }
-
-            // Read and discard stderr (may contain libcamera focus messages)
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    while (!proc.StandardError.EndOfStream)
-                    {
-                        var line = proc.StandardError.ReadLine();
-                        if (!string.IsNullOrWhiteSpace(line))
-                            Console.WriteLine($"[FOCUS] {line}");
-                    }
-                }
-                catch { }
-            }, token);
-
-            // Wait for the calibration to complete (rpicam-vid exits after timeout)
-            await proc.WaitForExitAsync(cts.Token);
-
-            if (proc.ExitCode == 0)
-                Console.WriteLine("[FOCUS] Calibration completed successfully");
-            else
-                Console.WriteLine($"[FOCUS] Calibration exited with code {proc.ExitCode}");
+            Console.WriteLine($"Camera capture requires V4L2 device at {_devicePath}");
+            return;
         }
-        catch (OperationCanceledException)
-        {
-            Console.WriteLine("[FOCUS] Calibration timed out or cancelled");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[FOCUS] Calibration error: {ex.Message}");
-        }
+
+        if (IsCapturing)
+            return;
+
+        _captureWidth = width;
+        _captureHeight = height;
+        _captureFramerate = framerate;
+        _captureCts = new CancellationTokenSource();
+        ApplyV4l2Controls();
+
+        Task.Run(() =>
+            CaptureLoop(width, height, framerate, _captureCts.Token));
+    }
+
+    public void StopCapture()
+    {
+        _captureCts?.Cancel();
+        KillFfmpeg();
+        _captureCts = null;
     }
 
     private async Task CaptureLoop(
@@ -747,18 +470,13 @@ public class CameraService : IDisposable
         TrimLogFile("/var/log/pi-stream-cam/output.log");
         TrimLogFile("/var/log/pi-stream-cam/error.log");
 
-        // Run focus calibration once per service lifetime, before the main pipeline
         if (!_focusCalibrated)
         {
-            await CalibrateFocusAsync(width, height, framerate, token);
             _focusCalibrated = true;
-            _initialFocus = false;
 
-            // If focus was at default (never explicitly set), force autofocus auto
-            // so calibration result isn't immediately overridden by a stale manual position
             if (!_autofocus && _focus >= 45 && _focus <= 55)
             {
-                Console.WriteLine("[FOCUS] Focus was at default position, switching to autofocus auto");
+                Console.WriteLine("[FOCUS] Focus was at default, switching to autofocus auto");
                 _autofocus = true;
                 _afMode = "auto";
                 SaveState();
@@ -773,7 +491,7 @@ public class CameraService : IDisposable
             try
             {
                 if (consecutiveFailures == 5)
-                    KillStaleProcesses("rpicam-vid");
+                    KillStaleProcesses("ffmpeg");
 
                 if (consecutiveFailures >= maxFailures)
                 {
@@ -783,24 +501,22 @@ public class CameraService : IDisposable
                     continue;
                 }
 
-                var args = BuildRpicamVidArgs(width, height, framerate);
-                Console.WriteLine($"[PIPELINE] rpicam-vid {string.Join(" ", args)}");
+                var args = BuildFfmpegCaptureArgs(width, height, framerate);
+                Console.WriteLine($"[PIPELINE] ffmpeg {args}");
 
-                var rpicamPsi = new ProcessStartInfo
+                var ffmpegPsi = new ProcessStartInfo
                 {
-                    FileName = "rpicam-vid",
-                    Arguments = string.Join(" ", args),
+                    FileName = FfmpegPath,
+                    Arguments = args,
                     UseShellExecute = false,
-                    RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
-                rpicamPsi.Environment["LIBCAMERA_LOG_LEVELS"] = "ERROR";
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
                 cts.CancelAfter(30000);
-                var rpicam = Process.Start(rpicamPsi);
-                if (rpicam == null)
+                var ffmpeg = Process.Start(ffmpegPsi);
+                if (ffmpeg == null)
                 {
                     consecutiveFailures++;
                     var delay = Math.Min(consecutiveFailures * 1000, 15000);
@@ -809,29 +525,23 @@ public class CameraService : IDisposable
                 }
 
                 consecutiveFailures = 0;
-                lock (_captureLock) { _captureProcess = rpicam; }
+                lock (_captureLock) { _captureProcess = ffmpeg; }
 
-                rpicam.ErrorDataReceived += (_, e) =>
+                ffmpeg.ErrorDataReceived += (_, e) =>
                 {
                     if (!string.IsNullOrWhiteSpace(e.Data))
-                        Console.WriteLine($"rpicam: {e.Data}");
+                        Console.WriteLine($"ffmpeg: {e.Data}");
                 };
-                rpicam.BeginErrorReadLine();
+                ffmpeg.BeginErrorReadLine();
 
-                await RunPipeLoop(rpicam, token);
+                await ffmpeg.WaitForExitAsync(token);
 
-                rpicam.Dispose();
-                lock (_captureLock) { _captureProcess = null; }
-
-                lock (_ffmpegLock)
+                lock (_captureLock)
                 {
-                    if (_ffmpegProcess != null)
-                    {
-                        try { _ffmpegProcess.Kill(true); } catch { }
-                        _ffmpegProcess.Dispose();
-                        _ffmpegProcess = null;
-                    }
+                    if (_captureProcess == ffmpeg)
+                        _captureProcess = null;
                 }
+                ffmpeg.Dispose();
 
                 if (!token.IsCancellationRequested)
                     await Task.Delay(1000, token);
@@ -850,98 +560,26 @@ public class CameraService : IDisposable
         }
     }
 
-    private async Task RunPipeLoop(Process rpicam, CancellationToken token)
+    private string BuildFfmpegCaptureArgs(int width, int height, int framerate)
     {
-        var buffer = new byte[65536];
-        var stream = rpicam.StandardOutput.BaseStream;
+        var cropW = _zoom > 1 ? (int)(width / _zoom) & ~1 : width;
+        var cropH = _zoom > 1 ? (int)(height / _zoom) & ~1 : height;
+        var cropX = (int)((width - cropW) / 2.0) & ~1;
+        var cropY = (int)((height - cropH) / 2.0) & ~1;
 
-        // Start ffmpeg once and keep it running
-        var ffmpeg = StartFfmpeg();
-        if (ffmpeg == null) return;
+        var flip = _videoFlipped ? "1" : "0";
+        var vf = $"vflip=enable={flip},crop={cropW}:{cropH}:{cropX}:{cropY},scale={width}:{height}";
 
-        // Prepend saved H.264 headers for mid-stream decoder init
-        if (_h264Headers != null)
-        {
-            await ffmpeg.StandardInput.BaseStream.WriteAsync(_h264Headers, token);
-        }
-
-        var firstRead = true;
-
-        while (!token.IsCancellationRequested)
-        {
-            try
-            {
-                var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token);
-                if (bytesRead == 0) break;
-
-                // Save first chunk (contains SPS/PPS headers for decoder recovery)
-                if (firstRead)
-                {
-                    firstRead = false;
-                    _h264Headers = new byte[bytesRead];
-                    Array.Copy(buffer, _h264Headers, bytesRead);
-                }
-
-                await ffmpeg.StandardInput.BaseStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (IOException)
-            {
-                Console.WriteLine("[PIPELINE] ffmpeg pipe broken, restarting...");
-                ffmpeg!.Dispose();
-                lock (_ffmpegLock) { _ffmpegProcess = null; }
-
-                var newFfmpeg = StartFfmpeg();
-                if (newFfmpeg == null)
-                {
-                    await Task.Delay(2000, token);
-                    continue;
-                }
-                ffmpeg = newFfmpeg;
-
-                if (_h264Headers != null)
-                {
-                    await ffmpeg.StandardInput.BaseStream.WriteAsync(_h264Headers, token);
-                }
-            }
-        }
-    }
-
-    private Process? StartFfmpeg()
-    {
-        var ffArgs = BuildFfmpegArgs();
-        Console.WriteLine($"[PIPELINE] ffmpeg {ffArgs}");
-
-        var ffmpegPsi = new ProcessStartInfo
-        {
-            FileName = FfmpegPath,
-            Arguments = ffArgs,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        var ffmpeg = Process.Start(ffmpegPsi);
-        if (ffmpeg == null)
-        {
-            Console.WriteLine("[PIPELINE] Failed to start ffmpeg");
-            return null;
-        }
-
-        ffmpeg.ErrorDataReceived += (_, e) =>
-        {
-            if (!string.IsNullOrWhiteSpace(e.Data))
-                Console.WriteLine($"ffmpeg: {e.Data}");
-        };
-        ffmpeg.BeginErrorReadLine();
-        lock (_ffmpegLock) { _ffmpegProcess = ffmpeg; }
-        return ffmpeg;
+        var bitrate = height >= 1080 ? 12000 : 2000;
+        return $"-f v4l2 -input_format mjpeg -video_size {width}x{height} -framerate {framerate} " +
+               $"-i {_devicePath} " +
+               $"-vf \"{vf}\" " +
+               $"-c:v h264_v4l2m2m -b:v {bitrate}k -flags low_delay -tune zerolatency " +
+               $"-f rtsp -rtsp_transport tcp rtsp://localhost:8554/cam";
     }
 
     public void Dispose()
     {
         StopCapture();
     }
-
 }

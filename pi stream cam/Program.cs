@@ -30,7 +30,8 @@ builder.Services.AddAuthentication("Cookies")
         options.SlidingExpiration = true;
     });
 
-var cameraService = new CameraService();
+var cameraDevice = builder.Configuration.GetValue<string>("CameraDevicePath") ?? "/dev/video0";
+var cameraService = new CameraService(cameraDevice);
 var servoService = new ServoService();
 
 builder.Services.AddSingleton(cameraService);
