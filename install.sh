@@ -71,7 +71,7 @@ uninstall() {
     rm -f /usr/local/bin/pi-cam-power
 
     log_info "Note: mediamtx, ffmpeg, and system packages were NOT removed."
-    log_info "To remove those: sudo apt-get remove libcamera-apps ffmpeg mediamtx"
+    log_info "To remove those: sudo apt-get remove ffmpeg mediamtx"
     log_info "State files in $STATE_DIR were kept."
     log_info "To remove state: sudo rm -rf $STATE_DIR"
 
