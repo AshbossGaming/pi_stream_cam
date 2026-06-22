@@ -55,7 +55,6 @@ jobs:
           cp -r release-build/* "dist/$DIR_NAME/"
 
           # Copy scripts needed for install
-          cp "pi stream cam/scripts/zmqsend.c" "dist/$DIR_NAME/scripts/"
           cp "pi stream cam/scripts/pi-cam-power.c" "dist/$DIR_NAME/scripts/"
           cp "pi stream cam/scripts/mediamtx.yml" "dist/$DIR_NAME/"
           cp "pi stream cam/scripts/mediamtx.service" "dist/$DIR_NAME/"

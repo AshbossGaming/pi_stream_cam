@@ -67,10 +67,8 @@ uninstall() {
     log_info "Removing application files..."
     rm -rf "$APP_ROOT"
 
-    log_info "Removing zmqsend and power helper..."
-    rm -f /usr/local/bin/zmqsend
+    log_info "Removing power helper..."
     rm -f /usr/local/bin/pi-cam-power
-    rm -f /etc/pi-stream-cam-ffmpeg-path
 
     log_info "Note: mediamtx, ffmpeg, and system packages were NOT removed."
     log_info "To remove those: sudo apt-get remove libcamera-apps ffmpeg mediamtx"
@@ -178,70 +176,12 @@ log_step "Installing system dependencies"
 
 apt-get update -qq
 apt-get install -y -qq \
-    libcamera-apps \
-    build-essential \
-    gcc \
-    make \
-    pkg-config \
-    libzmq3-dev \
-    libzmq5 \
+    ffmpeg \
     wget \
     curl \
     tar
 
-# --- Check / install ffmpeg with ZMQ ---
-log_step "Checking ffmpeg ZMQ support"
-
-FFMPEG_PATH=""
-FFMPEG_STATIC="/usr/local/bin/ffmpeg-static"
-
-if command -v ffmpeg &>/dev/null && ffmpeg -filters 2>/dev/null | grep -q " zmq "; then
-    log_info "System ffmpeg has ZMQ support"
-    FFMPEG_PATH="$(command -v ffmpeg)"
-elif [ -x "$FFMPEG_STATIC" ] && "$FFMPEG_STATIC" -filters 2>/dev/null | grep -q " zmq "; then
-    log_info "Static ffmpeg has ZMQ support"
-    FFMPEG_PATH="$FFMPEG_STATIC"
-else
-    log_info "Downloading static ffmpeg with ZMQ support..."
-    apt-get install -y -qq xz-utils
-
-    BtBN_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64.tar.xz"
-    wget -q -O /tmp/ffmpeg-static.tar.xz "$BtBN_URL"
-    tar -xf /tmp/ffmpeg-static.tar.xz -C /tmp/
-
-    FFMPEG_EXTRACTED=$(find /tmp/ffmpeg-master-latest-linuxarm64 -name ffmpeg -type f 2>/dev/null | head -1)
-    if [ -n "$FFMPEG_EXTRACTED" ]; then
-        cp "$FFMPEG_EXTRACTED" "$FFMPEG_STATIC"
-        chown root:root "$FFMPEG_STATIC"
-        chmod 755 "$FFMPEG_STATIC"
-        FFMPEG_PATH="$FFMPEG_STATIC"
-        log_info "Static ffmpeg installed to $FFMPEG_STATIC"
-    else
-        log_warn "Could not find ffmpeg binary in downloaded tarball"
-    fi
-
-    rm -rf /tmp/ffmpeg-master-latest-linuxarm64 /tmp/ffmpeg-static.tar.xz
-fi
-
-# Write ffmpeg path
-if [ -n "$FFMPEG_PATH" ]; then
-    echo "$FFMPEG_PATH" > /etc/pi-stream-cam-ffmpeg-path
-    log_info "ffmpeg path written to /etc/pi-stream-cam-ffmpeg-path"
-fi
-
-# --- Compile zmqsend helper ---
-log_step "Compiling zmqsend helper"
-
-if [ -f "$EXTRACT_DIR/scripts/zmqsend.c" ]; then
-    gcc -Os -s -o /tmp/zmqsend "$EXTRACT_DIR/scripts/zmqsend.c" -lzmq
-    cp /tmp/zmqsend /usr/local/bin/zmqsend
-    chown root:root /usr/local/bin/zmqsend
-    chmod 755 /usr/local/bin/zmqsend
-    rm -f /tmp/zmqsend
-    log_info "zmqsend installed at /usr/local/bin/zmqsend"
-else
-    log_warn "zmqsend.c not found in release"
-fi
+log_info "ffmpeg installed"
 
 # --- Install MediaMTX ---
 log_step "Installing MediaMTX RTSP server"
