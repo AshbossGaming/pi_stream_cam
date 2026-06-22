@@ -174,6 +174,9 @@ app.MapGet("/dock", async context =>
     await context.Response.SendFileAsync("wwwroot/dock.html");
 }).RequireAuthorization();
 
+// Sync video flip with servo tilt at startup
+cameraService.SetVideoFlip(servoService.TiltAngle < 90);
+
 cameraService.StartCapture();
 
 app.Lifetime.ApplicationStopping.Register(() =>
