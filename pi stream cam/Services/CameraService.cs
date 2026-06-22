@@ -568,7 +568,7 @@ public class CameraService : IDisposable
         var cropY = (int)((height - cropH) / 2.0) & ~1;
 
         var flip = _videoFlipped ? "1" : "0";
-        var vf = $"vflip=enable={flip},crop={cropW}:{cropH}:{cropX}:{cropY},scale={width}:{height}";
+        var vf = $"vflip=enable={flip},crop={cropW}:{cropH}:{cropX}:{cropY},scale={width}:{height},format=yuv420p";
 
         var bitrate = height >= 1080 ? 12000 : 2000;
         return $"-f v4l2 -input_format mjpeg -video_size {width}x{height} -framerate {framerate} " +
