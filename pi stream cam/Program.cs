@@ -140,10 +140,10 @@ app.MapPost("/api/option", async context =>
                 case "focusrange": camera.SetFocusRange(prop.Value.GetString()!); set++; break;
                 case "exposurecomp": camera.SetExposureCompensation(prop.Value.GetInt32()); set++; break;
                 case "whitebalance": camera.SetWhiteBalance(prop.Value.GetInt32()); set++; break;
-                case "sharpness": camera.SetSharpness(prop.Value.GetDouble()); set++; break;
+                case "sharpness": camera.SetSharpness(prop.Value.GetInt32()); set++; break;
                 case "brightness": camera.SetBrightness(prop.Value.GetInt32()); set++; break;
-                case "contrast": camera.SetContrast(prop.Value.GetDouble()); set++; break;
-                case "saturation": camera.SetSaturation(prop.Value.GetDouble()); set++; break;
+                case "contrast": camera.SetContrast(prop.Value.GetInt32()); set++; break;
+                case "saturation": camera.SetSaturation(prop.Value.GetInt32()); set++; break;
                 case "quality": camera.SetQuality(prop.Value.GetInt32()); set++; break;
                 case "videoflipped": camera.SetVideoFlip(prop.Value.GetBoolean()); set++; break;
                 case "pan": await servo.SetPanAsync(prop.Value.GetInt32()); set++; break;
