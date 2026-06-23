@@ -224,42 +224,42 @@
     
     <div class="slider-group">
         <label>Zoom <span id="zoomValue">1x</span></label>
-        <input type="range" id="zoomSlider" min="1" max="8" value="1" oninput="updateZoom()" onchange="commitZoom()">
+        <input type="range" id="zoomSlider" min="1" max="5" value="1" oninput="updateZoom()" onchange="commitZoom()">
     </div>
     
     <div class="slider-group">
-        <label>Focus <span id="focusValue">50</span></label>
-        <input type="range" id="focusSlider" min="0" max="100" value="50" oninput="updateFocus()" onchange="setFocus()">
+        <label>Focus <span id="focusValue">51</span></label>
+        <input type="range" id="focusSlider" min="0" max="255" value="51" oninput="updateFocus()" onchange="setFocus()">
     </div>
     
     <div class="slider-group">
-        <label>Exposure <span id="exposureValue">0</span></label>
-        <input type="range" id="exposureSlider" min="-8" max="8" value="0" oninput="updateExposure()" onchange="setExposure()">
+        <label>Exposure <span id="exposureValue">Auto</span></label>
+        <input type="range" id="exposureSlider" min="0" max="8" value="0" oninput="updateExposure()" onchange="setExposure()">
     </div>
     
     <div class="slider-group">
         <label>White Balance <span id="wbValue">Auto</span></label>
-        <input type="range" id="wbSlider" min="0" max="8" value="0" oninput="updateWb()" onchange="setWb()">
+        <input type="range" id="wbSlider" min="0" max="6" value="0" oninput="updateWb()" onchange="setWb()">
     </div>
     
     <div class="slider-group">
-        <label>Sharpness <span id="sharpValue">1.0</span></label>
-        <input type="range" id="sharpSlider" min="0" max="160" value="10" oninput="updateSharpness()" onchange="setSharpness()">
+        <label>Sharpness <span id="sharpValue">22</span></label>
+        <input type="range" id="sharpSlider" min="0" max="255" value="22" oninput="updateSharpness()" onchange="setSharpness()">
     </div>
     
     <div class="slider-group">
-        <label>Brightness <span id="brightValue">0</span></label>
-        <input type="range" id="brightSlider" min="-1" max="1" value="0" oninput="updateBrightness()" onchange="setBrightness()">
+        <label>Brightness <span id="brightValue">128</span></label>
+        <input type="range" id="brightSlider" min="0" max="255" value="128" oninput="updateBrightness()" onchange="setBrightness()">
     </div>
     
     <div class="slider-group">
-        <label>Contrast <span id="contrastValue">1.0</span></label>
-        <input type="range" id="contrastSlider" min="0" max="20" value="10" oninput="updateContrast()" onchange="setContrast()">
+        <label>Contrast <span id="contrastValue">32</span></label>
+        <input type="range" id="contrastSlider" min="0" max="255" value="32" oninput="updateContrast()" onchange="setContrast()">
     </div>
     
     <div class="slider-group">
-        <label>Saturation <span id="satValue">1.0</span></label>
-        <input type="range" id="satSlider" min="0" max="20" value="10" oninput="updateSaturation()" onchange="setSaturation()">
+        <label>Saturation <span id="satValue">32</span></label>
+        <input type="range" id="satSlider" min="0" max="255" value="32" oninput="updateSaturation()" onchange="setSaturation()">
     </div>
     
     <div class="controls" style="margin-bottom: 12px;">
@@ -309,20 +309,20 @@
     </div>
     
     <script>
-        let currentPan = 90, currentTilt = 45, currentZoom = 1, currentFocus = 50;
+        let currentPan = 90, currentTilt = 45, currentZoom = 1, currentFocus = 51;
         let videoFlipped = false;
         let autoFocus = true;
         let afMode = 'continuous';
         let focusRange = 'normal';
         let exposureComp = 0;
         let whiteBalance = 0;
-        let sharpness = 1.0;
-        let brightness = 0;
-        let contrast = 1.0;
-        let saturation = 1.0;
+        let sharpness = 22;
+        let brightness = 128;
+        let contrast = 32;
+        let saturation = 32;
         let presets = [];
         
-        const wbModes = ['Auto', 'Incandescent', 'Tungsten', 'Fluorescent', 'Indoor', 'Daylight', 'Cloudy', 'Cool White', 'Flash'];
+        const wbModes = ['Auto', 'Incandescent', 'Warm Fluor.', 'Cool Fluor.', 'Daylight', 'Cloudy', 'Shade'];
         
         function updateStatus(msg, type = '') {
             const el = document.getElementById('status');
@@ -549,7 +549,7 @@
         async function updateExposure() {
             const slider = document.getElementById('exposureSlider');
             const value = parseInt(slider.value);
-            document.getElementById('exposureValue').textContent = value > 0 ? '+' + value : value;
+            document.getElementById('exposureValue').textContent = value === 0 ? 'Auto' : 'Level ' + value;
         }
         
         async function setExposure() {
@@ -581,25 +581,25 @@
         
         async function updateSharpness() {
             const slider = document.getElementById('sharpSlider');
-            const value = parseInt(slider.value) / 10;
-            document.getElementById('sharpValue').textContent = value.toFixed(1);
+            const value = parseInt(slider.value);
+            document.getElementById('sharpValue').textContent = value;
         }
         
         async function setSharpness() {
             const slider = document.getElementById('sharpSlider');
-            const value = parseInt(slider.value) / 10;
+            const value = parseInt(slider.value);
             const result = await apiCall('/api/ptz/sharpness/' + value, { method: 'POST' });
             if (result) {
                 sharpness = result.sharpness;
-                document.getElementById('sharpValue').textContent = sharpness.toFixed(1);
-                updateStatus('Sharpness: ' + sharpness.toFixed(1), 'success');
+                document.getElementById('sharpValue').textContent = sharpness;
+                updateStatus('Sharpness: ' + sharpness, 'success');
             }
         }
         
         async function updateBrightness() {
             const slider = document.getElementById('brightSlider');
             const value = parseInt(slider.value);
-            document.getElementById('brightValue').textContent = value > 0 ? '+' + value : value;
+            document.getElementById('brightValue').textContent = value;
         }
         
         async function setBrightness() {
@@ -608,42 +608,42 @@
             const result = await apiCall('/api/ptz/brightness/' + value, { method: 'POST' });
             if (result) {
                 brightness = result.brightness;
-                document.getElementById('brightValue').textContent = brightness > 0 ? '+' + brightness : brightness.toFixed(1);
-                updateStatus('Brightness: ' + (brightness > 0 ? '+' : '') + brightness.toFixed(1), 'success');
+                document.getElementById('brightValue').textContent = brightness;
+                updateStatus('Brightness: ' + brightness, 'success');
             }
         }
         
         async function updateContrast() {
             const slider = document.getElementById('contrastSlider');
-            const value = parseInt(slider.value) / 10;
-            document.getElementById('contrastValue').textContent = value.toFixed(1);
+            const value = parseInt(slider.value);
+            document.getElementById('contrastValue').textContent = value;
         }
         
         async function setContrast() {
             const slider = document.getElementById('contrastSlider');
-            const value = parseInt(slider.value) / 10;
+            const value = parseInt(slider.value);
             const result = await apiCall('/api/ptz/contrast/' + value, { method: 'POST' });
             if (result) {
                 contrast = result.contrast;
-                document.getElementById('contrastValue').textContent = contrast.toFixed(1);
-                updateStatus('Contrast: ' + contrast.toFixed(1), 'success');
+                document.getElementById('contrastValue').textContent = contrast;
+                updateStatus('Contrast: ' + contrast, 'success');
             }
         }
         
         async function updateSaturation() {
             const slider = document.getElementById('satSlider');
-            const value = parseInt(slider.value) / 10;
-            document.getElementById('satValue').textContent = value.toFixed(1);
+            const value = parseInt(slider.value);
+            document.getElementById('satValue').textContent = value;
         }
         
         async function setSaturation() {
             const slider = document.getElementById('satSlider');
-            const value = parseInt(slider.value) / 10;
+            const value = parseInt(slider.value);
             const result = await apiCall('/api/ptz/saturation/' + value, { method: 'POST' });
             if (result) {
                 saturation = result.saturation;
-                document.getElementById('satValue').textContent = saturation.toFixed(1);
-                updateStatus('Saturation: ' + saturation.toFixed(1), 'success');
+                document.getElementById('satValue').textContent = saturation;
+                updateStatus('Saturation: ' + saturation, 'success');
             }
         }
         

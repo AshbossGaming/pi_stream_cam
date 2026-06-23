@@ -18,16 +18,16 @@ public class CameraService : IDisposable
     private CancellationTokenSource? _captureCts;
 
     private int _zoom = 1;
-    private int _focus = 50;
+    private int _focus = 51;
     private bool _autofocus = true;
     private string _afMode = "continuous";
     private string _focusRange = "full";
     private int _exposureComp = 0;
     private int _whiteBalance = 0;
-    private double _sharpness = 6.0;
-    private int _brightness = 0;
-    private double _contrast = 1.2;
-    private double _saturation = 1.1;
+    private int _sharpness = 22;
+    private int _brightness = 128;
+    private int _contrast = 32;
+    private int _saturation = 32;
     private int _quality = 40;
     private bool _videoFlipped;
     private int _captureWidth = 1920;
@@ -35,7 +35,9 @@ public class CameraService : IDisposable
     private int _captureFramerate = 30;
     private bool _focusCalibrated;
 
-    private static readonly string[] AwbPresets = { "auto", "incandescent", "tungsten", "fluorescent", "daylight", "cloudy", "shade", "custom" };
+    private static readonly int[] WbTemperatures = { 0, 2800, 3200, 4000, 5000, 5600, 6500 };
+    private static readonly string[] WbNames = { "Auto", "Incandescent", "Warm Fluor.", "Cool Fluor.", "Daylight", "Cloudy", "Shade" };
+    private static readonly int[] ExposureAbsoluteValues = { 0, 3, 50, 100, 200, 400, 800, 1200, 2047 };
 
     private readonly string _stateFile = "/var/lib/pi-stream-cam/camera-state.json";
 
@@ -111,10 +113,10 @@ public class CameraService : IDisposable
             var doc = System.Text.Json.JsonDocument.Parse(json);
 
             if (doc.RootElement.TryGetProperty("zoom", out var z))
-                _zoom = Math.Clamp(z.GetInt32(), 1, 8);
+                _zoom = Math.Clamp(z.GetInt32(), 1, 5);
 
             if (doc.RootElement.TryGetProperty("focus", out var f))
-                _focus = Math.Clamp(f.GetInt32(), 0, 100);
+                _focus = Math.Clamp(f.GetInt32(), 0, 255);
 
             if (doc.RootElement.TryGetProperty("autofocus", out var af))
                 _autofocus = af.GetBoolean();
@@ -129,22 +131,22 @@ public class CameraService : IDisposable
                 _focusRange = fr.GetString() ?? "normal";
 
             if (doc.RootElement.TryGetProperty("exposurecomp", out var ec))
-                _exposureComp = Math.Clamp(ec.GetInt32(), -8, 8);
+                _exposureComp = Math.Clamp(ec.GetInt32(), 0, 8);
 
             if (doc.RootElement.TryGetProperty("whitebalance", out var wb))
-                _whiteBalance = Math.Clamp(wb.GetInt32(), 0, 8);
+                _whiteBalance = Math.Clamp(wb.GetInt32(), 0, 6);
 
             if (doc.RootElement.TryGetProperty("sharpness", out var sh))
-                _sharpness = sh.GetDouble();
+                _sharpness = Math.Clamp(sh.GetInt32(), 0, 255);
 
             if (doc.RootElement.TryGetProperty("brightness", out var br))
-                _brightness = Math.Clamp(br.GetInt32(), -1, 1);
+                _brightness = Math.Clamp(br.GetInt32(), 0, 255);
 
             if (doc.RootElement.TryGetProperty("contrast", out var co))
-                _contrast = Math.Clamp(co.GetDouble(), 0.0, 2.0);
+                _contrast = Math.Clamp(co.GetInt32(), 0, 255);
 
             if (doc.RootElement.TryGetProperty("saturation", out var sa))
-                _saturation = Math.Clamp(sa.GetDouble(), 0.0, 2.0);
+                _saturation = Math.Clamp(sa.GetInt32(), 0, 255);
 
             if (doc.RootElement.TryGetProperty("videoflipped", out var vf))
                 _videoFlipped = vf.GetBoolean();
@@ -196,15 +198,15 @@ public class CameraService : IDisposable
 
     public void SetZoom(int level)
     {
-        _zoom = Math.Clamp(level, 1, 8);
+        _zoom = Math.Clamp(level, 1, 5);
         Console.WriteLine($"Zoom set: {_zoom}x");
         SaveState();
-        KillFfmpeg();
+        RunV4l2Ctl($"zoom_absolute={_zoom}");
     }
 
     public void SetFocus(int value)
     {
-        _focus = Math.Clamp(value, 0, 100);
+        _focus = Math.Clamp(value, 0, 255);
         _autofocus = false;
         _afMode = "manual";
         Console.WriteLine($"Focus set: {_focus}");
@@ -252,23 +254,23 @@ public class CameraService : IDisposable
 
     public void SetExposureCompensation(int value)
     {
-        _exposureComp = Math.Clamp(value, -8, 8);
-        Console.WriteLine($"Exposure compensation: {_exposureComp}");
+        _exposureComp = Math.Clamp(value, 0, 8);
+        Console.WriteLine($"Exposure: level={_exposureComp}");
         SaveState();
         ApplyV4l2Controls();
     }
 
     public void SetWhiteBalance(int value)
     {
-        _whiteBalance = Math.Clamp(value, 0, 8);
+        _whiteBalance = Math.Clamp(value, 0, 6);
         Console.WriteLine($"White balance: {_whiteBalance}");
         SaveState();
         ApplyV4l2Controls();
     }
 
-    public void SetSharpness(double value)
+    public void SetSharpness(int value)
     {
-        _sharpness = value;
+        _sharpness = Math.Clamp(value, 0, 255);
         Console.WriteLine($"Sharpness: {_sharpness}");
         SaveState();
         ApplyV4l2Controls();
@@ -276,24 +278,24 @@ public class CameraService : IDisposable
 
     public void SetBrightness(int value)
     {
-        _brightness = Math.Clamp(value, -1, 1);
+        _brightness = Math.Clamp(value, 0, 255);
         Console.WriteLine($"Brightness: {_brightness}");
         SaveState();
         ApplyV4l2Controls();
     }
 
-    public void SetContrast(double value)
+    public void SetContrast(int value)
     {
-        _contrast = Math.Clamp(value, 0.0, 2.0);
-        Console.WriteLine($"Contrast: {_contrast:F1}");
+        _contrast = Math.Clamp(value, 0, 255);
+        Console.WriteLine($"Contrast: {_contrast}");
         SaveState();
         ApplyV4l2Controls();
     }
 
-    public void SetSaturation(double value)
+    public void SetSaturation(int value)
     {
-        _saturation = Math.Clamp(value, 0.0, 2.0);
-        Console.WriteLine($"Saturation: {_saturation:F1}");
+        _saturation = Math.Clamp(value, 0, 255);
+        Console.WriteLine($"Saturation: {_saturation}");
         SaveState();
         ApplyV4l2Controls();
     }
@@ -335,32 +337,38 @@ public class CameraService : IDisposable
             return;
 
         if (_autofocus)
-        {
             RunV4l2Ctl("focus_automatic_continuous=1");
-        }
         else
         {
             RunV4l2Ctl("focus_automatic_continuous=0");
-            var focusVal = (int)(_focus / 100.0 * 255);
-            RunV4l2Ctl($"focus_absolute={Math.Clamp(focusVal, 0, 255)}");
+            RunV4l2Ctl($"focus_absolute={Math.Clamp(_focus, 0, 255)}");
         }
+
+        RunV4l2Ctl($"brightness={Math.Clamp(_brightness, 0, 255)}");
+        RunV4l2Ctl($"contrast={Math.Clamp(_contrast, 0, 255)}");
+        RunV4l2Ctl($"saturation={Math.Clamp(_saturation, 0, 255)}");
+        RunV4l2Ctl($"sharpness={Math.Clamp(_sharpness, 0, 255)}");
+        RunV4l2Ctl($"zoom_absolute={Math.Clamp(_zoom, 1, 5)}");
 
         if (_whiteBalance == 0)
             RunV4l2Ctl("white_balance_automatic=1");
         else
+        {
             RunV4l2Ctl("white_balance_automatic=0");
+            var wbIdx = Math.Clamp(_whiteBalance, 0, 6);
+            if (wbIdx > 0 && wbIdx < WbTemperatures.Length)
+                RunV4l2Ctl($"white_balance_temperature={WbTemperatures[wbIdx]}");
+        }
 
-        var sharpVal = (int)(_sharpness / 16.0 * 255);
-        RunV4l2Ctl($"sharpness={Math.Clamp(sharpVal, 0, 255)}");
-
-        var brightVal = (int)((_brightness + 1.0) / 2.0 * 255);
-        RunV4l2Ctl($"brightness={Math.Clamp(brightVal, 0, 255)}");
-
-        var contrastVal = (int)(_contrast / 2.0 * 255);
-        RunV4l2Ctl($"contrast={Math.Clamp(contrastVal, 0, 255)}");
-
-        var satVal = (int)(_saturation / 2.0 * 255);
-        RunV4l2Ctl($"saturation={Math.Clamp(satVal, 0, 255)}");
+        if (_exposureComp == 0)
+            RunV4l2Ctl("auto_exposure=3");
+        else
+        {
+            RunV4l2Ctl("auto_exposure=1");
+            var expIdx = Math.Clamp(_exposureComp, 0, 8);
+            if (expIdx > 0 && expIdx < ExposureAbsoluteValues.Length)
+                RunV4l2Ctl($"exposure_time_absolute={ExposureAbsoluteValues[expIdx]}");
+        }
     }
 
     private void RunV4l2Ctl(string controlArg)
@@ -562,13 +570,7 @@ public class CameraService : IDisposable
 
     private string BuildFfmpegCaptureArgs(int width, int height, int framerate)
     {
-        var cropW = _zoom > 1 ? (int)(width / _zoom) & ~1 : width;
-        var cropH = _zoom > 1 ? (int)(height / _zoom) & ~1 : height;
-        var cropX = (int)((width - cropW) / 2.0) & ~1;
-        var cropY = (int)((height - cropH) / 2.0) & ~1;
-
-        var flip = _videoFlipped ? "1" : "0";
-        var vf = $"vflip=enable={flip},crop={cropW}:{cropH}:{cropX}:{cropY},scale={width}:{height},format=yuv420p";
+        var vf = _videoFlipped ? "vflip,format=yuv420p" : "format=yuv420p";
 
         var bitrate = height >= 1080 ? 12000 : 2000;
         return $"-f v4l2 -input_format mjpeg -video_size {width}x{height} -framerate {framerate} " +

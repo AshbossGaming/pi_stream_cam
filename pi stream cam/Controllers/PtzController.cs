@@ -122,7 +122,7 @@ public class PtzController : ControllerBase
     }
 
     [HttpPost("sharpness/{value}")]
-    public IActionResult SetSharpness(double value)
+    public IActionResult SetSharpness(int value)
     {
         _cameraService.SetSharpness(value);
         return Ok(new { sharpness = _cameraService.Sharpness });
@@ -136,14 +136,14 @@ public class PtzController : ControllerBase
     }
 
     [HttpPost("contrast/{value}")]
-    public IActionResult SetContrast(double value)
+    public IActionResult SetContrast(int value)
     {
         _cameraService.SetContrast(value);
         return Ok(new { contrast = _cameraService.Contrast });
     }
 
     [HttpPost("saturation/{value}")]
-    public IActionResult SetSaturation(double value)
+    public IActionResult SetSaturation(int value)
     {
         _cameraService.SetSaturation(value);
         return Ok(new { saturation = _cameraService.Saturation });

@@ -12,6 +12,7 @@ build/
 publish-arm64/
 publish-deploy/
 publish-fd/
+publish-linux/
 
 # Android project
 PiCamAndroid/
